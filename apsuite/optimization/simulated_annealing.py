@@ -116,7 +116,7 @@ class SimulAnneal:
         rarray = 2 * np.random.rand(self.ndim) - 1  # [-1,1]
         self._delta = dlim * rarray
         self._position = self._position + self._delta
-        # self._check_lim()
+        self._check_lim()
 
     def _save_data(self, k, f, acc=False, nacc=None, bp=None, bf=None):
         """."""
