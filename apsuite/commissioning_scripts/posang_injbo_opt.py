@@ -3,51 +3,13 @@
 
 import time as _time
 import numpy as np
+
 from siriuspy.epics import PV
+from siriuspy.namesys import SiriusPVName
 
-from pymodels.middlelayer.devices import DCCT, SOFB
+from pymodels.middlelayer.devices import DCCT, SOFB, Septum, Kicker
 from apsuite.optimization import PSO, SimulAnneal
-
-
-class Septum:
-    """."""
-
-    def __init__(self):
-        """."""
-        self.sp = 'TB-04:PM-InjSept:Kick-SP'
-        self.rb = 'TB-04:PM-InjSept:Kick-RB'
-
-
-class Kicker:
-    """."""
-
-    def __init__(self):
-        """."""
-        self.sp = 'BO-01D:PM-InjKckr:Kick-SP'
-        self.rb = 'BO-01D:PM-InjKckr:Kick-RB'
-
-
-class Corrs:
-    """."""
-
-    def __init__(self):
-        """."""
-        names = ['TB-04:MA-CH-1', 'TB-04:MA-CV-1', 'TB-04:MA-CV-2']
-        self.sp = [c + ':Kick-SP' for c in names]
-        self.rb = [c + ':Kick-RB' for c in names]
-
-
-class Quads:
-    """."""
-
-    def __init__(self):
-        """."""
-        names = [
-            'TB-02:MA-QF2A', 'TB-02:MA-QF2B',
-            'TB-02:MA-QD2A', 'TB-02:MA-QD2B'
-        ]
-        self.sp = [c + ':KL-SP' for c in names]
-        self.rb = [c + ':KL-RB' for c in names]
+from apsuite.commissioning_scripts.base import BaseClass
 
 
 class Params:
@@ -55,87 +17,131 @@ class Params:
 
     def __init__(self):
         """."""
-        self.deltas = {'Quads': 1, 'Corrs': 1000, 'InjSept': 2, 'InjKckr': 2}
+        self.deltas = {'Corrs': 500, 'InjSept': 0.5, 'InjKckr': 0.5}
         self.niter = 10
-        self.nbuffer = 10
-        self.nturns = 1
-        self.nbpm = 50
         self.wait_change = 5
-        self.dcct_nrsamples = 50
-        self.dcct_period = 0.05
-        self.dcct_timeout = 10
-        self.freq = 2
+        self.nrpulses = 20
+        self.freq_pulses = 2
+        self.timeout_sum = 30
+        self.wait_time = 2
+
+    def __str__(self):
+        """."""
+        st = '{0:30s}= {1:9.3f}\n'.format(
+            'delta corrs [urad]', self.deltas['Corrs'])
+        st += '{0:30s}= {1:9.3f}\n'.format(
+            'delta injsept [mrad]', self.deltas['InjSept'])
+        st += '{0:30s}= {1:9.3f}\n'.format(
+            'delta injkckr [mrad]', self.deltas['InjKckr'])
+        st += '{0:30s}= {1:9d}\n'.format('number of pulses', self.nrpulses)
+        st += '{0:30s}= {1:9.3f}\n'.format(
+            'pulses freq [Hz]', self.freq_pulses)
+        st += '{0:30s}= {1:9.3f}\n'.format('SOFB timeout', self.timeout_sum)
+        return st
 
 
-class PSOInjection(PSO):
+class Corrs():
+    """."""
+
+    def __init__(self, name):
+        """."""
+        self._name = SiriusPVName(name)
+        self._curr_sp = PV(self._name.substitute(propty='Current-SP'))
+        self._curr_rb = PV(self._name.substitute(propty='Current-RB'))
+        maname = self._name
+        if not self._name.dis == 'MA':
+            maname = self._name.substitute(dis='MA')
+        self._kick_sp = PV(maname.substitute(propty='Kick-SP'))
+        self._kick_rb = PV(maname.substitute(propty='Kick-RB'))
+
+    @property
+    def name(self):
+        """."""
+        return self._name
+
+    @property
+    def kick(self):
+        """."""
+        return self._kick_rb.value
+
+    @kick.setter
+    def kick(self, value):
+        self._kick_sp.value = value
+
+    @property
+    def current(self):
+        """."""
+        return self._curr_rb.value
+
+    @current.setter
+    def current(self, value):
+        self._curr_sp.value = value
+
+    @property
+    def connected(self):
+        """."""
+        conn = self._curr_sp.connected
+        conn &= self._curr_rb.connected
+        conn &= self._kick_rb.connected
+        conn &= self._kick_sp.connected
+        return conn
+
+
+class PSOInjection(BaseClass, PSO):
     """."""
 
     def __init__(self, save=False):
         """."""
+        super().__init__(Params(), PSO(save=save))
+        self.devices = {
+            'dcct': DCCT(),
+            'sofb': SOFB('BO'),
+            'injsept': Septum('TB-04:PM-InjSept'),
+            'injkckr': Kicker('BO-01D:PM-InjKckr'),
+            'ch-1': Corrs('TB-04:MA-CH-1'),
+            'cv-1': Corrs('TB-04:MA-CV-1'),
+            'cv-2': Corrs('TB-04:MA-CV-2'),
+            }
+        self.data = {
+            'pos_epoch': [],
+            'fig_epoch': [],
+            'fig_init': [],
+            'reference': [],
+            'nswarm': self.nswarm,
+            }
         self.reference = []
         self.eyes = []
         self.hands = []
         self.f_init = 0
-        self.params = Params()
-        self.sofb = SOFB('BO')
-        self.dcct = DCCT()
-        self.quads = Quads()
-        self.corrs = Corrs()
-        self.kckr = Kicker()
-        self.sept = Septum()
-        PSO.__init__(self, save=save)
+        # PSO.__init__(self, save=save)
 
     def initialization(self):
         """."""
         self.niter = self.params.niter
-        self.nr_turns = self.params.nturns
-        self.nr_bpm = self.params.nbpm
-        self.bpm_idx = self.nr_bpm + 50 * (self.nr_turns - 1)
+        self.set_hands_eyes()
+        self.devices['sofb'].nr_points = self.params.nrpulses
 
-        self.get_pvs()
-
-        while True:
-            if self.check_connect():
-                break
-
-        self.sofb.nr_points = self.params.nbuffer
-
-        quad_lim = np.ones(len(self.quads.sp)) * self.params.deltas['Quads']
-        corr_lim = np.ones(len(self.corrs.sp)) * self.params.deltas['Corrs']
+        corr_lim = np.ones(3) * self.params.deltas['Corrs']
         sept_lim = np.array([self.params.deltas['InjSept']])
         kckr_lim = np.array([self.params.deltas['InjKckr']])
 
-        up = np.concatenate((quad_lim, corr_lim, sept_lim, kckr_lim))
-        down = -1 * up
-        self.set_limits(upper=up, lower=down)
-
-        self.dcct.turn_off(self.params.dcct_timeout)
-        self.dcct.nrsamples = self.params.dcct_nrsamples
-        self.dcct.period = self.params.dcct_period
-        self.dcct.turn_on(self.params.dcct_timeout)
-
-        self.reference = np.array([h.value for h in self.hands])
-        # self.reset_wait_buffer()
+        up_lim = np.concatenate((corr_lim, sept_lim, kckr_lim))
+        down_lim = -1 * up_lim
+        self.set_limits(upper=up_lim, lower=down_lim)
+        self.reference = np.array([h.kick for h in self.hands])
+        self.data['reference'].append(self.reference)
         self.init_obj_func()
+        self.data['fig_init'].append(self.f_init)
 
-    def get_pvs(self):
+    def set_hands_eyes(self):
         """."""
-        # self.eyes = self.sofb.sum
-        self.eyes = self.dcct.current
-
-        self.hands = [PV(c) for c in self.corrs.sp]
-        self.hands.append(PV(self.kckr.sp))
-        self.hands.append(PV(self.sept.sp))
-
-    def check_connect(self):
-        """."""
-        conh = [h.connected for h in self.hands]
-        cone = self.eyes.connected
-        if cone and sum(conh) == len(conh):
-            con = True
-        else:
-            con = False
-        return con
+        self.eyes = self.devices['sofb'].sum
+        self.hands = []
+        self.hands.append(self.devices['ch-1'])
+        self.hands.append(self.devices['cv-1'])
+        self.hands.append(self.devices['cv-2'])
+        self.hands.append(self.devices['injsept'])
+        self.hands.append(self.devices['injkckr'])
 
     def get_change(self, part):
         """."""
@@ -143,141 +149,138 @@ class PSOInjection(PSO):
 
     def set_change(self, change):
         """."""
-        for k in range(len(self.hands)):
-            self.hands[k].value = change[k]
+        for k, hand in enumerate(self.hands):
+            hand.kick = change[k]
 
-    def reset_wait_buffer(self):
+    def wait(self, timeout=10):
         """."""
-        self.sofb.reset()
-        self.sofb.wait()
+        self.devices['sofb'].wait(timeout=timeout)
+
+    def reset(self, wait=0):
+        """."""
+        if self._stopped.wait(wait):
+            return False
+        self.devices['sofb'].reset()
+        if self._stopped.wait(1):
+            return False
+        return True
 
     def init_obj_func(self):
         """."""
-        # self.f_init = -np.sum(self.eyes.value[:self.bpm_idx])
-        pulse_cnt = []
-        for _ in range(self.params.nbuffer):
-            pulse_cnt.append(np.mean(self.eyes))
-            _time.sleep(1/self.params.freq)
-        self.f_init = -np.mean(pulse_cnt)
+        self.reset(self.params.wait_time)
+        self.wait(self.params.timeout_sum)
+        self.f_init = -np.mean(self.eyes)
 
     def calc_obj_fun(self):
         """."""
         f_out = np.zeros(self.nswarm)
-        for i in range(self.nswarm):
-            pulse_cnt = []
-            self.set_change(self.get_change(i))
+        for part in range(self.nswarm):
+            self.set_change(self.get_change(part))
             _time.sleep(self.params.wait_change)
-            for _ in range(self.params.nbuffer):
-                pulse_cnt.append(np.mean(self.eyes))
-                _time.sleep(1/self.params.freq)
-            # self.reset_wait_buffer()
-            # f_out[i] = np.sum(self.eyes.value[:self.bpm_idx])
-            f_out[i] = np.mean(pulse_cnt)
+            self.reset(self.params.wait_time)
+            self.wait(self.params.timeout_sum)
+            f_out[part] = -np.mean(self.eyes)
             print(
                 'Particle {:02d}/{:d} | Obj. Func. : {:f}'.format(
-                    i+1, self.nswarm, f_out[i]))
+                    part+1, self.nswarm, f_out[part]))
+            posepoch = self.reference + self.position[part, :]
+            self.data['pos_epoch'].append(posepoch)
+            self.data['fig_epoch'].append(f_out[part])
         return - f_out
 
 
-class SAInjection(SimulAnneal):
+class SAInjection(BaseClass, SimulAnneal):
     """."""
 
     def __init__(self, save=False):
         """."""
+        super().__init__(Params())
+        self.devices = {
+            'dcct': DCCT(),
+            'sofb': SOFB('BO'),
+            'injsept': Septum('TB-04:PM-InjSept'),
+            'injkckr': Kicker('BO-01D:PM-InjKckr'),
+            'ch-1': Corrs('TB-04:MA-CH-1'),
+            'cv-1': Corrs('TB-04:MA-CV-1'),
+            'cv-2': Corrs('TB-04:MA-CV-2'),
+            }
+        self.data = {
+            'pos_epoch': [],
+            'fig_epoch': [],
+            'fig_init': [],
+            'reference': [],
+            }
         self.reference = []
         self.eyes = []
         self.hands = []
         self.f_init = 0
-        self.params = Params()
-        self.dcct = DCCT()
-        self.sofb = SOFB('BO')
-        self.quads = Quads()
-        self.corrs = Corrs()
-        self.kckr = Kicker()
-        self.sept = Septum()
         SimulAnneal.__init__(self, save=save)
 
     def initialization(self):
         """."""
         self.niter = self.params.niter
-        self.nr_turns = self.params.nturns
-        self.nr_bpm = self.params.nbpm
-        self.bpm_idx = self.nr_bpm + 50 * (self.nr_turns - 1)
+        self.set_hands_eyes()
+        self.devices['sofb'].nr_points = self.params.nrpulses
 
-        self.get_pvs()
-
-        while True:
-            if self.check_connect():
-                break
-
-        quad_lim = np.ones(len(self.quads.sp)) * self.params.deltas['Quads']
-        corr_lim = np.ones(len(self.corrs.sp)) * self.params.deltas['Corrs']
+        corr_lim = np.ones(3) * self.params.deltas['Corrs']
         sept_lim = np.array([self.params.deltas['InjSept']])
         kckr_lim = np.array([self.params.deltas['InjKckr']])
 
-        up = np.concatenate((quad_lim, corr_lim, sept_lim, kckr_lim))
-        # down = -1 * up
-        infty = float('Inf')
-        self.set_limits(upper=up*infty, lower=-1*up*infty)
-        self.set_deltas(dmax=up)
+        up_lim = np.concatenate((corr_lim, sept_lim, kckr_lim))
+        down_lim = -1 * up_lim
+        self.set_limits(upper=up_lim, lower=down_lim)
+        self.set_deltas(dmax=up_lim)
 
-        self.reference = np.array([h.value for h in self.hands])
+        self.reference = np.array([h.kick for h in self.hands])
+        self.data['reference'].append(self.reference)
         self.position = self.reference
-        # self.reset_wait_buffer()
         self.init_obj_func()
+        self.data['fig_init'].append(self.f_init)
 
-    def get_pvs(self):
+    def set_hands_eyes(self):
         """."""
-        # self.eyes = self.sofb.sum
-        self.eyes = self.dcct.current
-
-        self.hands = [PV(c) for c in self.corrs.sp]
-        self.hands.append(PV(self.kckr.sp))
-        self.hands.append(PV(self.sept.sp))
-
-    def check_connect(self):
-        """."""
-        conh = [h.connected for h in self.hands]
-        cone = self.eyes.connected
-        if cone and sum(conh) == len(conh):
-            con = True
-        else:
-            con = False
-        return con
+        self.eyes = self.devices['sofb'].sum
+        self.hands = []
+        self.hands.append(self.devices['ch-1'])
+        self.hands.append(self.devices['cv-1'])
+        self.hands.append(self.devices['cv-2'])
+        self.hands.append(self.devices['injsept'])
+        self.hands.append(self.devices['injkckr'])
 
     def get_change(self):
         """."""
-        return self.position
+        return self.reference + self.position
 
     def set_change(self, change):
         """."""
-        for k in range(len(self.hands)):
-            self.hands[k].value = change[k]
+        for k, hand in self.hands:
+            hand.kick = change[k]
 
-    def reset_wait_buffer(self):
+    def wait(self, timeout=10):
         """."""
-        self.sofb.reset()
-        self.sofb.wait()
+        self.devices['sofb'].wait(timeout=timeout)
+
+    def reset(self, wait=0):
+        """."""
+        if self._stopped.wait(wait):
+            return False
+        self.devices['sofb'].reset()
+        if self._stopped.wait(1):
+            return False
+        return True
 
     def init_obj_func(self):
         """."""
-        # self.f_init = -np.sum(self.eyes.value[:self.bpm_idx])
-        pulse_cnt = []
-        for _ in range(self.params.nbuffer):
-            pulse_cnt.append(np.mean(self.eyes))
-            _time.sleep(1/self.params.freq)
-        self.f_init = -np.mean(pulse_cnt)
+        self.reset(self.params.wait_time)
+        self.wait(self.params.timeout_sum)
+        self.f_init = -np.mean(self.eyes)
 
     def calc_obj_fun(self):
         """."""
-        f_out = []
-        pulse_cnt = []
-        self.set_change(self.get_change())
-        _time.sleep(self.params.wait_change)
-        # self.reset_wait_buffer()
-        for _ in range(self.params.nbuffer):
-            pulse_cnt.append(np.mean(self.eyes))
-            _time.sleep(1/self.params.freq)
-        # f_out = np.sum(self.eyes.value[:self.bpm_idx])
-        f_out = np.mean(pulse_cnt)
-        return - f_out
+        self.reset(self.params.wait_time)
+        self.wait(self.params.timeout_sum)
+        posepoch = self.reference + self.position
+        f_out = -np.mean(self.eyes)
+        self.data['pos_epoch'].append(posepoch)
+        self.data['fig_epoch'].append(f_out)
+        return f_out
