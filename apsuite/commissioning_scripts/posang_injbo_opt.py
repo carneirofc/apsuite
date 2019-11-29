@@ -249,7 +249,7 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def get_change(self):
         """."""
-        return self.reference + self.position
+        return self.position
 
     def set_change(self, change):
         """."""
@@ -277,9 +277,10 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def calc_obj_fun(self):
         """."""
+        self.set_change(self.get_change())
         self.reset(self.params.wait_time)
         self.wait(self.params.timeout_sum)
-        posepoch = self.reference + self.position
+        posepoch = self.position
         f_out = -np.mean(self.eyes)
         self.data['pos_epoch'].append(posepoch)
         self.data['fig_epoch'].append(f_out)
