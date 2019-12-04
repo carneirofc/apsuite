@@ -24,6 +24,7 @@ class Params:
         self.freq_pulses = 2
         self.timeout_sum = 30
         self.wait_time = 2
+        self.last_sum_idx = 50
 
     def __str__(self):
         """."""
@@ -36,10 +37,13 @@ class Params:
         st += '{0:30s}= {1:9d}\n'.format('number of pulses', self.nrpulses)
         st += '{0:30s}= {1:9.3f}\n'.format(
             'pulses freq [Hz]', self.freq_pulses)
-        st += '{0:30s}= {1:9.3f}\n'.format('SOFB timeout', self.timeout_sum)
         st += '{0:30s}= {1:9.3f}\n'.format(
-            'wait time to measure', self.wait_time)
+            'SOFB timeout [s]', self.timeout_sum)
         st += '{0:30s}= {1:9.3f}\n'.format(
+            'last bpm to get sum signal', self.last_sum_idx)
+        st += '{0:30s}= {1:9.3f}\n'.format(
+            'wait time to measure [s]', self.wait_time)
+        st += '{0:30s}= {1:9d}\n'.format(
             'number of iterations', self.niter)
         return st
 
@@ -130,7 +134,7 @@ class PSOInjection(BaseClass, PSO):
         kckr_lim = [self.params.deltas['InjKckr']]
         up_lim = np.concatenate((corr_lim, sept_lim, kckr_lim))
         down_lim = -1 * up_lim
-
+        self.set_limits(upper=up_lim, lower=down_lim)
         ref = []
         for hand in self.hands:
             if hand.name.dev not in {'CH', 'CV'}:
@@ -138,16 +142,13 @@ class PSOInjection(BaseClass, PSO):
             else:
                 ref.append(hand.kick)
         self.reference = np.array(ref)
-        up_lim += self.reference
-        down_lim += self.reference
-        self.set_limits(upper=up_lim, lower=down_lim)
         self.data['reference'].append(self.reference)
         self.init_obj_func()
         self.data['fig_init'].append(self.f_init)
 
     def set_hands_eyes(self):
         """."""
-        self.eyes = self.devices['sofb'].sum
+        self.eyes = self.devices['sofb'].sum[:self.params.last_sum_idx]
         self.hands = []
         self.hands.append(self.devices['ch-1'])
         self.hands.append(self.devices['cv-1'])
@@ -262,7 +263,7 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def set_hands_eyes(self):
         """."""
-        self.eyes = self.devices['sofb'].sum
+        self.eyes = self.devices['sofb'].sum[:self.params.last_sum_idx]
         self.hands = []
         self.hands.append(self.devices['ch-1'])
         self.hands.append(self.devices['cv-1'])
