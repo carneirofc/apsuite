@@ -17,10 +17,10 @@ class Params:
 
     def __init__(self):
         """."""
-        self.deltas = {'Corrs': 500, 'InjSept': 0.5, 'InjKckr': 0.5}
-        self.niter = 10
+        self.deltas = {'Corrs': 50, 'InjSept': 0, 'InjKckr': 0}
+        self.niter = 20
         self.wait_change = 5
-        self.nrpulses = 20
+        self.nrpulses = 5
         self.freq_pulses = 2
         self.timeout_sum = 30
         self.wait_time = 2
@@ -37,6 +37,10 @@ class Params:
         st += '{0:30s}= {1:9.3f}\n'.format(
             'pulses freq [Hz]', self.freq_pulses)
         st += '{0:30s}= {1:9.3f}\n'.format('SOFB timeout', self.timeout_sum)
+        st += '{0:30s}= {1:9.3f}\n'.format(
+            'wait time to measure', self.wait_time)
+        st += '{0:30s}= {1:9.3f}\n'.format(
+            'number of iterations', self.niter)
         return st
 
 
@@ -92,7 +96,12 @@ class PSOInjection(BaseClass, PSO):
 
     def __init__(self, save=False):
         """."""
-        super().__init__(Params(), PSO(save=save))
+        super().__init__(Params())
+        self.reference = []
+        self.eyes = []
+        self.hands = []
+        self.f_init = 0
+        PSO.__init__(self, save=save)
         self.devices = {
             'dcct': DCCT(),
             'sofb': SOFB('BO'),
@@ -109,11 +118,6 @@ class PSOInjection(BaseClass, PSO):
             'reference': [],
             'nswarm': self.nswarm,
             }
-        self.reference = []
-        self.eyes = []
-        self.hands = []
-        self.f_init = 0
-        # PSO.__init__(self, save=save)
 
     def initialization(self):
         """."""
@@ -122,13 +126,21 @@ class PSOInjection(BaseClass, PSO):
         self.devices['sofb'].nr_points = self.params.nrpulses
 
         corr_lim = np.ones(3) * self.params.deltas['Corrs']
-        sept_lim = np.array([self.params.deltas['InjSept']])
-        kckr_lim = np.array([self.params.deltas['InjKckr']])
-
+        sept_lim = [self.params.deltas['InjSept']]
+        kckr_lim = [self.params.deltas['InjKckr']]
         up_lim = np.concatenate((corr_lim, sept_lim, kckr_lim))
         down_lim = -1 * up_lim
+
+        ref = []
+        for hand in self.hands:
+            if hand.name.dev not in {'CH', 'CV'}:
+                ref.append(hand.voltage)
+            else:
+                ref.append(hand.kick)
+        self.reference = np.array(ref)
+        up_lim += self.reference
+        down_lim += self.reference
         self.set_limits(upper=up_lim, lower=down_lim)
-        self.reference = np.array([h.kick for h in self.hands])
         self.data['reference'].append(self.reference)
         self.init_obj_func()
         self.data['fig_init'].append(self.f_init)
@@ -150,7 +162,10 @@ class PSOInjection(BaseClass, PSO):
     def set_change(self, change):
         """."""
         for k, hand in enumerate(self.hands):
-            hand.kick = change[k]
+            if hand.name.dev not in {'CH', 'CV'}:
+                hand.voltage = change[k]
+            else:
+                hand.kick = change[k]
 
     def wait(self, timeout=10):
         """."""
@@ -198,8 +213,8 @@ class SAInjection(BaseClass, SimulAnneal):
         self.devices = {
             'dcct': DCCT(),
             'sofb': SOFB('BO'),
-            'injsept': Septum('TB-04:PM-InjSept'),
-            'injkckr': Kicker('BO-01D:PM-InjKckr'),
+            'injsept': Septum('TB-04:PU-InjSept'),
+            'injkckr': Kicker('BO-01D:PU-InjKckr'),
             'ch-1': Corrs('TB-04:MA-CH-1'),
             'cv-1': Corrs('TB-04:MA-CV-1'),
             'cv-2': Corrs('TB-04:MA-CV-2'),
@@ -223,15 +238,23 @@ class SAInjection(BaseClass, SimulAnneal):
         self.devices['sofb'].nr_points = self.params.nrpulses
 
         corr_lim = np.ones(3) * self.params.deltas['Corrs']
-        sept_lim = np.array([self.params.deltas['InjSept']])
-        kckr_lim = np.array([self.params.deltas['InjKckr']])
+        sept_lim = [self.params.deltas['InjSept']]
+        kckr_lim = [self.params.deltas['InjKckr']]
 
         up_lim = np.concatenate((corr_lim, sept_lim, kckr_lim))
         down_lim = -1 * up_lim
+        ref = []
+        for hand in self.hands:
+            if hand.name.dev not in {'CH', 'CV'}:
+                ref.append(hand.voltage)
+            else:
+                ref.append(hand.kick)
+        self.reference = np.array(ref)
+        self.set_deltas(dmax=up_lim-down_lim)
+        up_lim += self.reference
+        down_lim += self.reference
         self.set_limits(upper=up_lim, lower=down_lim)
-        self.set_deltas(dmax=up_lim)
 
-        self.reference = np.array([h.kick for h in self.hands])
         self.data['reference'].append(self.reference)
         self.position = self.reference
         self.init_obj_func()
@@ -253,8 +276,11 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def set_change(self, change):
         """."""
-        for k, hand in self.hands:
-            hand.kick = change[k]
+        for k, hand in enumerate(self.hands):
+            if hand.name.dev not in {'CH', 'CV'}:
+                hand.voltage = change[k]
+            else:
+                hand.kick = change[k]
 
     def wait(self, timeout=10):
         """."""
