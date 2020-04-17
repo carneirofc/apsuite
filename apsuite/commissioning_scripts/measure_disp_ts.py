@@ -7,7 +7,7 @@ import numpy as np
 from epics import PV
 import pyaccel
 
-from pymodels.middlelayer.devices import SOFB, RF
+from siriuspy.devices import SOFB, RFGen
 from apsuite.commissioning_scripts.base import BaseClass
 
 
@@ -48,9 +48,9 @@ class MeasureDispTS(BaseClass):
         """."""
         super().__init__(ParamsDisp())
         self.devices = {
-            'ts_sofb': SOFB('TS'),
-            'bo_sofb': SOFB('BO'),
-            'rf': RF()
+            'ts_sofb': SOFB(SOFB.DEVICES.TS),
+            'bo_sofb': SOFB(SOFB.DEVICES.BO),
+            'rf': RFGen()
             }
         self.pvs = {
             'injsi_sp': PV('AS-RaMO:TI-EVG:InjSIDelay-SP'),
@@ -73,7 +73,7 @@ class MeasureDispTS(BaseClass):
     @property
     def trajx_bo(self):
         """."""
-        return self.devices['bo_sofb'].trajx_idx
+        return self.devices['bo_sofb'].trajx
 
     @property
     def trajy(self):
@@ -83,7 +83,7 @@ class MeasureDispTS(BaseClass):
     @property
     def trajy_bo(self):
         """."""
-        return self.devices['bo_sofb'].trajy_idx
+        return self.devices['bo_sofb'].trajy
 
     @property
     def injsi(self):
@@ -120,14 +120,14 @@ class MeasureDispTS(BaseClass):
 
     def wait(self, timeout=10):
         """."""
-        self.devices['ts_sofb'].wait(timeout=timeout)
-        self.devices['bo_sofb'].wait(timeout=timeout)
+        self.devices['ts_sofb'].wait_buffer(timeout=timeout)
+        self.devices['bo_sofb'].wait_buffer(timeout=timeout)
 
     def reset(self, wait=0):
         """."""
         _time.sleep(wait)
-        self.devices['ts_sofb'].reset()
-        self.devices['bo_sofb'].reset()
+        self.devices['ts_sofb'].cmd_reset()
+        self.devices['bo_sofb'].cmd_reset()
         _time.sleep(1)
 
     def calc_delta(self, delta):
@@ -180,17 +180,17 @@ class MeasureDispTS(BaseClass):
 
         d_ene = ene1/ene0 - 1
         return np.array(orb).sum(axis=0) / d_ene, \
-               np.array(orb_bo).sum(axis=0) / d_ene
+            np.array(orb_bo).sum(axis=0) / d_ene
 
 
 def calc_model_dispersionTS(model, bpms):
     """."""
     dene = 1e-3
+    rin = np.array([
+        [0, 0, 0, 0, dene/2, 0],
+        [0, 0, 0, 0, -dene/2, 0]]).T
     rout, *_ = pyaccel.tracking.line_pass(
-        model,
-        [[0, 0, 0, 0, dene/2, 0],
-         [0, 0, 0, 0, -dene/2, 0]],
-        bpms)
-    dispx = (rout[0, 0, :] - rout[1, 0, :]) / dene
-    dispy = (rout[0, 2, :] - rout[1, 2, :]) / dene
+        model, rin, bpms)
+    dispx = (rout[0, 0, :] - rout[0, 1, :]) / dene
+    dispy = (rout[2, 0, :] - rout[2, 1, :]) / dene
     return np.hstack([dispx, dispy])
