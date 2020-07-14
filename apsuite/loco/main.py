@@ -14,12 +14,10 @@ from .config import LOCOConfig as _LOCOConfig
 class LOCO:
     """Main LOCO algorithm."""
 
-    UTILS = _LOCOUtils
-    DEFAULT_TOL = 1e-3
+    DEFAULT_TOL = 1e-6
     DEFAULT_REDUC_THRESHOLD = 5/100
     DEFAULT_LAMBDA_LM = 1e-3
     DEFAULT_MAX_LAMBDA_LM = 1e6
-    DEFAULT_DELTAK_NORMALIZATION = 1.0
 
     def __init__(self, config=None):
         """."""
@@ -113,6 +111,7 @@ class LOCO:
         self._chi_history = []
         self._tol = None
         self._reduc_threshold = None
+        self._res_history = []
 
         self.fitmodel = None
         self.chi_history = None
@@ -120,6 +119,7 @@ class LOCO:
         self.bpm_roll = None
         self.corr_gain = None
         self.energy_shift = None
+        self.residue_history = None
 
     def update(self,
                fname_jloco_k=None,
@@ -471,15 +471,26 @@ class LOCO:
 
     def calc_jloco_deltak_constraint(self):
         """."""
-        sigma_deltak = LOCO.DEFAULT_DELTAK_NORMALIZATION
+        sigma_deltak = self.config.deltakl_normalization
         ncols = self._jloco.shape[1]
-        if self.config.use_quad_families:
-            nknobs = len(self.config.quadrupoles_to_fit)
-        else:
-            nknobs = len(self.config.quad_indices)
+        nknobs = 0
+
+        if self.config.fit_quadrupoles:
+            if self.config.use_quad_families:
+                nknobs += len(self.config.quadrupoles_to_fit)
+            else:
+                nknobs += len(self.config.quad_indices)
+        if self.config.fit_dipoles:
+            if self.config.use_dip_families:
+                nknobs += len(self.config.dipoles_to_fit)
+            else:
+                nknobs += len(self.config.dip_indices)
+        if self.config.fit_sextupoles:
+            nknobs += len(self.config.sext_indices)
+
         deltak_mat = _np.zeros((nknobs, ncols))
         for knb in range(nknobs):
-            deltak_mat[knb, knb] = self.config.weight_deltak[knb]/sigma_deltak
+            deltak_mat[knb, knb] = self.config.weight_deltakl[knb]/sigma_deltak
         return deltak_mat
 
     def update_svd(self):
@@ -591,7 +602,14 @@ class LOCO:
             matrix_diff, self.config.weight_bpm, self.config.weight_corr)
         res = matrix_diff.flatten()
         if self.config.constraint_deltak:
-            res = _np.hstack((res, self._quad_k_deltas))
+            kdeltas = []
+            if self.config.fit_quadrupoles:
+                kdeltas = _np.hstack((kdeltas, self._quad_k_deltas))
+            if self.config.fit_dipoles:
+                kdeltas = _np.hstack((kdeltas, self._dip_k_deltas))
+            if self.config.fit_sextupoles:
+                kdeltas = _np.hstack((kdeltas, self._sext_k_deltas))
+            res = _np.hstack((res, kdeltas))
         return res
 
     def run_fit(self, niter=1):
@@ -601,6 +619,7 @@ class LOCO:
             self._chi_history.append(self._chi)
             print('iter # {}/{}'.format(_iter+1, niter))
             res = self._calc_residue()
+            self._res_history.append(res)
             if self.config.inv_method == _LOCOConfig.INVERSION.Transpose:
                 param_new = _np.dot(
                     self._jloco_inv, _np.dot(
@@ -681,6 +700,19 @@ class LOCO:
         self.corr_gain = self._gain_corr_inival + self._gain_corr_delta
         self.energy_shift = self._energy_shift_inival + \
             self._energy_shift_deltas
+        self.residue_history = self._res_history
+
+    def clear_output_vars(self):
+        """."""
+        self.fitmodel = None
+        self.bpm_gain = None
+        self.bpm_roll = None
+        self.corr_gain = None
+        self.energy_shift = None
+        self.chi_history = []
+        self.residue_history = []
+        self._chi_history = []
+        self._res_history = []
 
     def _calc_model_matrix(self, param):
         """."""
@@ -827,7 +859,7 @@ class LOCO:
             print('chi was increased! Trial {0:d}'.format(_iter))
             print('applying lambda {0:0.4e}'.format(self.config.lambda_lm))
             self._recalculate_inv_jloco(case='bad')
-            res = self._calc_residue()
+            res, *_ = self._calc_residue()
             param_new = _np.dot(self._jloco_inv, _np.dot(self._jloco.T, res))
             param_new = param_new.flatten()
             model_new, matrix_new = self._calc_model_matrix(param_new)
