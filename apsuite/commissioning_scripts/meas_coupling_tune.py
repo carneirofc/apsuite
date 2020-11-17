@@ -201,6 +201,7 @@ class FitTunes(_SimulAnneal):
         _plt.title(title)
         _plt.grid()
         _plt.show()
+        return param, fittune1, fittune2
 
     def _calc_init_parms(self):
         """."""

@@ -22,7 +22,7 @@ class BetaParams:
     def __init__(self):
         """."""
         self.nr_measures = 1
-        self.quad_deltakl = 0.01  # [1/m]
+        self.quad_deltakl = 0.005  # [1/m]
         self.wait_quadrupole = 1  # [s]
         self.wait_tune = 3  # [s]
         self.timeout_quad_turnon = 10  # [s]
@@ -56,6 +56,7 @@ class MeasBeta(BaseClass):
 
     METHODS = _namedtuple('Methods', ['Analytic', 'Numeric'])(0, 1)
     _DEF_TIMEOUT = 60 * 60  # [s]
+    DEFAULT_DKL = 0.005
 
     def __init__(
             self, model, famdata=None,
@@ -183,7 +184,7 @@ class MeasBeta(BaseClass):
                     -K, L, byi, ayi, gyi)
         elif self.calc_method == MeasBeta.METHODS.Numeric:
             nux0, nuy0, *_ = pyaccel.optics.get_frac_tunes(self.model)
-            dkl = self.params.quad_deltakl
+            dkl = self.params.quad_deltakl or MeasBeta.DEFAULT_DKL
             for idx, qname in zip(quadsidx, quadnames):
                 korig = self.model[idx].KL
                 if 'QF' in self.model[idx].fam_name:
