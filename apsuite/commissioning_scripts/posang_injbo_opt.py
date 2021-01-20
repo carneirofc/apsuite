@@ -196,7 +196,6 @@ class PSOInjection(BaseClass, PSO):
 
     def wait(self, timeout=10):
         """."""
-<<<<<<< HEAD
         self.devices['sofb'].wait(timeout=timeout)
 
     def reset(self, wait=0):
@@ -206,6 +205,15 @@ class PSOInjection(BaseClass, PSO):
         self.devices['sofb'].reset()
         if self._stopped.wait(1):
             return False
+        self.sofb.cmd_reset()
+        self.sofb.wait_buffer()
+
+    def init_obj_func(self):
+        """."""
+        self.reset(self.params.wait_time)
+        self.wait(self.params.timeout_sum)
+        self.f_init = -np.mean(self.eyes)
+
     def calc_obj_fun(self):
         """."""
         for part in range(self.nswarm):
@@ -248,8 +256,6 @@ class SAInjection(BaseClass, SimulAnneal):
         self.eyes = []
         self.hands = []
         self.f_init = 0
-<<<<<<< HEAD
-=======
         self.params = Params()
         self.dcct = DCCT(DCCT.DEVICES.BO)
         self.sofb = SOFB(SOFB.DEVICES.BO)
@@ -257,7 +263,6 @@ class SAInjection(BaseClass, SimulAnneal):
         self.corrs = Corrs()
         self.kckr = Kicker()
         self.sept = Septum()
->>>>>>> master
         SimulAnneal.__init__(self, save=save)
 
     def initialization(self):
@@ -291,15 +296,6 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def set_hands_eyes(self):
         """."""
-<<<<<<< HEAD
-        self.eyes = self.devices['sofb'].sum[:self.params.last_sum_idx]
-        self.hands = []
-        self.hands.append(self.devices['ch-1'])
-        self.hands.append(self.devices['cv-1'])
-        self.hands.append(self.devices['cv-2'])
-        self.hands.append(self.devices['injsept'])
-        self.hands.append(self.devices['injkckr'])
-=======
         # self.eyes = self.sofb.sum
         self.eyes = self.dcct.current_fast
 
@@ -316,7 +312,6 @@ class SAInjection(BaseClass, SimulAnneal):
         else:
             con = False
         return con
->>>>>>> master
 
     def get_change(self):
         """."""
@@ -332,7 +327,6 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def wait(self, timeout=10):
         """."""
-<<<<<<< HEAD
         self.devices['sofb'].wait(timeout=timeout)
 
     def reset(self, wait=0):
@@ -343,10 +337,10 @@ class SAInjection(BaseClass, SimulAnneal):
         if self._stopped.wait(1):
             return False
         return True
-=======
         self.sofb.cmd_reset()
         self.sofb.wait_buffer()
->>>>>>> master
+        self.sofb.cmd_reset()
+        self.sofb.wait_buffer()
 
     def init_obj_func(self):
         """."""
