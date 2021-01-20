@@ -1,7 +1,6 @@
-#!/usr/bin/env python-sirius
 """."""
-
-import pickle as _pickle
+from mathphys.functions import save_pickle as _save_pickle, \
+    load_pickle as _load_pickle
 
 
 class BaseClass:
@@ -21,19 +20,18 @@ class BaseClass:
         conn &= all([pv.connected for pv in self.pvs.values()])
         return conn
 
-    def save_data(self, fname):
+    def save_data(self, fname, overwrite=False):
         """."""
         data = dict(params=self.params, data=self.data)
-        if not fname.endswith('.pickle'):
-            fname += '.pickle'
-        with open(fname, 'wb') as fil:
-            _pickle.dump(data, fil)
+        _save_pickle(data, fname, overwrite=overwrite)
+
+    def load_and_apply(self, fname):
+        """."""
+        data = self.load_data(fname)
+        self.data = data['data']
+        self.params = data['params']
 
     @staticmethod
     def load_data(fname):
         """."""
-        if not fname.endswith('.pickle'):
-            fname += '.pickle'
-        with open(fname, 'rb') as fil:
-            data = _pickle.load(fil)
-        return data
+        return _load_pickle(fname)

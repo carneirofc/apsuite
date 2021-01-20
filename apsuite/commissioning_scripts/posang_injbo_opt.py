@@ -5,9 +5,8 @@ import time as _time
 import numpy as np
 
 from siriuspy.epics import PV
-from siriuspy.namesys import SiriusPVName
+from siriuspy.devices import DCCT, SOFB
 
-from pymodels.middlelayer.devices import DCCT, SOFB, Septum, Kicker
 from apsuite.optimization import PSO, SimulAnneal
 from apsuite.commissioning_scripts.base import BaseClass
 
@@ -105,6 +104,13 @@ class PSOInjection(BaseClass, PSO):
         self.eyes = []
         self.hands = []
         self.f_init = 0
+        self.params = Params()
+        self.sofb = SOFB(SOFB.DEVICES.BO)
+        self.dcct = DCCT(DCCT.DEVICES.BO)
+        self.quads = Quads()
+        self.corrs = Corrs()
+        self.kckr = Kicker()
+        self.sept = Septum()
         PSO.__init__(self, save=save)
         self.devices = {
             'dcct': DCCT(),
@@ -126,35 +132,55 @@ class PSOInjection(BaseClass, PSO):
     def initialization(self):
         """."""
         self.niter = self.params.niter
-        self.set_hands_eyes()
-        self.devices['sofb'].nr_points = self.params.nrpulses
+        self.nr_turns = self.params.nturns
+        self.nr_bpm = self.params.nbpm
+        self.bpm_idx = self.nr_bpm + 50 * (self.nr_turns - 1)
 
-        corr_lim = np.ones(3) * self.params.deltas['Corrs']
-        sept_lim = [self.params.deltas['InjSept']]
-        kckr_lim = [self.params.deltas['InjKckr']]
-        up_lim = np.concatenate((corr_lim, sept_lim, kckr_lim))
-        down_lim = -1 * up_lim
-        self.set_limits(upper=up_lim, lower=down_lim)
-        ref = []
-        for hand in self.hands:
-            if hand.name.dev not in {'CH', 'CV'}:
-                ref.append(hand.voltage)
-            else:
-                ref.append(hand.kick)
-        self.reference = np.array(ref)
-        self.data['reference'].append(self.reference)
+        self.get_pvs()
+
+        while True:
+            if self.check_connect():
+                break
+
+        self.sofb.nr_points = self.params.nbuffer
+
+        quad_lim = np.ones(len(self.quads.sp)) * self.params.deltas['Quads']
+        corr_lim = np.ones(len(self.corrs.sp)) * self.params.deltas['Corrs']
+        sept_lim = np.array([self.params.deltas['InjSept']])
+        kckr_lim = np.array([self.params.deltas['InjKckr']])
+
+        up = np.concatenate((quad_lim, corr_lim, sept_lim, kckr_lim))
+        down = -1 * up
+        self.set_limits(upper=up, lower=down)
+
+        self.dcct.cmd_turn_off(self.params.dcct_timeout)
+        self.dcct.nrsamples = self.params.dcct_nrsamples
+        self.dcct.period = self.params.dcct_period
+        self.dcct.cmd_turn_on(self.params.dcct_timeout)
+
+        self.reference = np.array([h.value for h in self.hands])
+        # self.reset_wait_buffer()
         self.init_obj_func()
         self.data['fig_init'].append(self.f_init)
 
     def set_hands_eyes(self):
         """."""
-        self.eyes = self.devices['sofb'].sum[:self.params.last_sum_idx]
-        self.hands = []
-        self.hands.append(self.devices['ch-1'])
-        self.hands.append(self.devices['cv-1'])
-        self.hands.append(self.devices['cv-2'])
-        self.hands.append(self.devices['injsept'])
-        self.hands.append(self.devices['injkckr'])
+        # self.eyes = self.sofb.sum
+        self.eyes = self.dcct.current_fast
+
+        self.hands = [PV(c) for c in self.corrs.sp]
+        self.hands.append(PV(self.kckr.sp))
+        self.hands.append(PV(self.sept.sp))
+
+    def check_connect(self):
+        """."""
+        conh = [h.connected for h in self.hands]
+        cone = self.eyes.connected
+        if cone and sum(conh) == len(conh):
+            con = True
+        else:
+            con = False
+        return con
 
     def get_change(self, part):
         """."""
@@ -170,6 +196,7 @@ class PSOInjection(BaseClass, PSO):
 
     def wait(self, timeout=10):
         """."""
+<<<<<<< HEAD
         self.devices['sofb'].wait(timeout=timeout)
 
     def reset(self, wait=0):
@@ -179,17 +206,8 @@ class PSOInjection(BaseClass, PSO):
         self.devices['sofb'].reset()
         if self._stopped.wait(1):
             return False
-        return True
-
-    def init_obj_func(self):
-        """."""
-        self.reset(self.params.wait_time)
-        self.wait(self.params.timeout_sum)
-        self.f_init = -np.mean(self.eyes)
-
     def calc_obj_fun(self):
         """."""
-        f_out = np.zeros(self.nswarm)
         for part in range(self.nswarm):
             self.set_change(self.get_change(part))
             _time.sleep(self.params.wait_change)
@@ -230,6 +248,16 @@ class SAInjection(BaseClass, SimulAnneal):
         self.eyes = []
         self.hands = []
         self.f_init = 0
+<<<<<<< HEAD
+=======
+        self.params = Params()
+        self.dcct = DCCT(DCCT.DEVICES.BO)
+        self.sofb = SOFB(SOFB.DEVICES.BO)
+        self.quads = Quads()
+        self.corrs = Corrs()
+        self.kckr = Kicker()
+        self.sept = Septum()
+>>>>>>> master
         SimulAnneal.__init__(self, save=save)
 
     def initialization(self):
@@ -263,6 +291,7 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def set_hands_eyes(self):
         """."""
+<<<<<<< HEAD
         self.eyes = self.devices['sofb'].sum[:self.params.last_sum_idx]
         self.hands = []
         self.hands.append(self.devices['ch-1'])
@@ -270,6 +299,24 @@ class SAInjection(BaseClass, SimulAnneal):
         self.hands.append(self.devices['cv-2'])
         self.hands.append(self.devices['injsept'])
         self.hands.append(self.devices['injkckr'])
+=======
+        # self.eyes = self.sofb.sum
+        self.eyes = self.dcct.current_fast
+
+        self.hands = [PV(c) for c in self.corrs.sp]
+        self.hands.append(PV(self.kckr.sp))
+        self.hands.append(PV(self.sept.sp))
+
+    def check_connect(self):
+        """."""
+        conh = [h.connected for h in self.hands]
+        cone = self.eyes.connected
+        if cone and sum(conh) == len(conh):
+            con = True
+        else:
+            con = False
+        return con
+>>>>>>> master
 
     def get_change(self):
         """."""
@@ -285,6 +332,7 @@ class SAInjection(BaseClass, SimulAnneal):
 
     def wait(self, timeout=10):
         """."""
+<<<<<<< HEAD
         self.devices['sofb'].wait(timeout=timeout)
 
     def reset(self, wait=0):
@@ -295,6 +343,10 @@ class SAInjection(BaseClass, SimulAnneal):
         if self._stopped.wait(1):
             return False
         return True
+=======
+        self.sofb.cmd_reset()
+        self.sofb.wait_buffer()
+>>>>>>> master
 
     def init_obj_func(self):
         """."""

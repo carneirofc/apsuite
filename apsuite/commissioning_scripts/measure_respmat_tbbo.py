@@ -7,8 +7,8 @@ import numpy as np
 import pyaccel
 
 from siriuspy.namesys import SiriusPVName as _PVName
+from siriuspy.devices import SOFB
 
-from pymodels.middlelayer.devices import SOFB
 from apsuite.optimization import SimulAnneal
 from apsuite.commissioning_scripts.base import BaseClass
 
@@ -32,8 +32,8 @@ class MeasureRespMatTBBO(BaseClass):
         """."""
         super().__init__(Params())
         self.devices = {
-            'bo_sofb': SOFB('BO'),
-            'tb_sofb': SOFB('TB'),
+            'bo_sofb': SOFB(SOFB.DEVICES.BO),
+            'tb_sofb': SOFB(SOFB.DEVICES.TB),
             }
         self._all_corrs = all_corrs
         self._matrix = dict()
@@ -45,25 +45,25 @@ class MeasureRespMatTBBO(BaseClass):
     def trajx(self):
         """."""
         return np.hstack(
-            [self.devices['tb_sofb'].trajx, self.devices['bo_sofb'].trajx_idx])
+            [self.devices['tb_sofb'].trajx, self.devices['bo_sofb'].trajx])
 
     @property
     def trajy(self):
         """."""
         return np.hstack(
-            [self.devices['tb_sofb'].trajy, self.devices['bo_sofb'].trajy_idx])
+            [self.devices['tb_sofb'].trajy, self.devices['bo_sofb'].trajy])
 
     def wait(self, timeout=10):
         """."""
-        self.devices['tb_sofb'].wait(timeout=timeout)
-        self.devices['bo_sofb'].wait(timeout=timeout)
+        self.devices['tb_sofb'].wait_buffer(timeout=timeout)
+        self.devices['bo_sofb'].wait_buffer(timeout=timeout)
 
     def reset(self, wait=0):
         """."""
         if self._stopped.wait(wait):
             return False
-        self.devices['tb_sofb'].reset()
-        self.devices['bo_sofb'].reset()
+        self.devices['tb_sofb'].cmd_reset()
+        self.devices['bo_sofb'].cmd_reset()
         if self._stopped.wait(1):
             return False
         return True
@@ -178,10 +178,17 @@ def calc_model_respmatTBBO(tb_mod, model, corr_names, elems, meth='middle',
         cortype = elem.magnet_type
         kxl = kyl = ksxl = ksyl = 0
         if corr.dev == 'InjSept':
-            kxl = tb_mod[indcs[0][1]].KxL
-            kyl = tb_mod[indcs[0][1]].KyL
-            ksxl = tb_mod[indcs[0][1]].KsxL
-            ksyl = tb_mod[indcs[0][1]].KsyL
+            # kxl = tb_mod[indcs[0][1]].KxL
+            # kyl = tb_mod[indcs[0][1]].KyL
+            # ksxl = tb_mod[indcs[0][1]].KsxL
+            # ksyl = tb_mod[indcs[0][1]].KsyL
+            midx = pyaccel.lattice.find_indices(
+                tb_mod, 'fam_name', 'InjSeptM66')
+            for m in midx:
+                kxl += tb_mod[m].KxL
+                kyl += tb_mod[m].KyL
+                ksxl += tb_mod[m].KsxL
+                ksyl += tb_mod[m].KsyL
         if not ishor and corr.dev in {'InjSept', 'InjKckr'}:
             cortype = 'vertical'
         matrix[idx, :] = _get_respmat_line(
