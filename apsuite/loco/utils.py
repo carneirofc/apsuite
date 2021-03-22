@@ -275,9 +275,6 @@ class LOCOUtils:
     @staticmethod
     def jloco_calc_k_dip(config, model):
         """."""
-        matrix_nominal = LOCOUtils.respm_calc(
-            model, config.respm, config.use_dispersion)
-
         if config.use_dip_families:
             dip_indices = []
             for fam_name in config.famname_dipset:
@@ -341,12 +338,14 @@ class LOCOUtils:
             else:
                 set_quad_kdelta = LOCOUtils.set_quadset_kdelta
         else:
-            kvalues = _np.array(
-                _pyaccel.lattice.get_attribute(model, 'KL', indices))
+            kvalues = _pyaccel.lattice.get_attribute(model, 'KL', indices)
             if magtype == 'dipole':
                 set_quad_kdelta = LOCOUtils.set_dipmag_kdelta
             else:
                 set_quad_kdelta = LOCOUtils.set_quadmag_kdelta
+
+        if len(indices) == 1:
+            kvalues = [kvalues]
 
         kmatrix = _np.zeros((matrix_nominal.size, len(indices)))
         model_this = _dcopy(model)
@@ -366,8 +365,10 @@ class LOCOUtils:
         matrix_nominal = LOCOUtils.respm_calc(
             model, config.respm, config.use_dispersion)
 
-        ksvalues = _np.array(
-            _pyaccel.lattice.get_attribute(model, 'KsL', indices))
+        ksvalues = _pyaccel.lattice.get_attribute(model, 'KsL', indices)
+
+        if len(indices) == 1:
+            ksvalues = [ksvalues]
 
         if magtype == 'dipole':
             set_quad_ksdelta = LOCOUtils.set_dipmag_ksdelta
@@ -430,7 +431,7 @@ class LOCOUtils:
         """."""
         dip_indices = config.respm.fam_data['BN']['index']
         kick_matrix = LOCOUtils._parallel_base(
-            config, model, ksindices,
+            config, model, dip_indices,
             LOCOUtils._jloco_calc_kick_dip)
         return kick_matrix
 
