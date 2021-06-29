@@ -6,7 +6,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as mpl_gs
 
-from siriuspy.devices import SOFB, RFGen, Tune
+from siriuspy.devices import SOFB, RFGen, Tune, BunchbyBunch
 from pymodels import si
 import pyaccel
 
@@ -50,6 +50,8 @@ class MeasDispChrom(_BaseClass):
         super().__init__(params=MeasParams(), target=self._do_meas)
         self.devices['sofb'] = SOFB(SOFB.DEVICES.SI)
         self.devices['tune'] = Tune(Tune.DEVICES.SI)
+        self.devices['bbbh'] = BunchbyBunch('H')
+        self.devices['bbbv'] = BunchbyBunch('V')
         self.devices['rf'] = RFGen()
 
     def __str__(self):
@@ -119,6 +121,32 @@ class MeasDispChrom(_BaseClass):
             print('SOFB feedback was enable, restoring original state...')
             sofb.cmd_turn_on_autocorr()
         print('Finished!')
+
+    def get_tunes(self):
+        par = self.params
+        bbbh = self.devices['bbbh']
+        bbbv = self.devices['bbbv']
+        freq = bbbh.info.rf_freq_mon / bbbh.info.rf_freq_mon
+        if par.meas_tune_method == par.MEAS_TUNE_METHOD.SpecAnal:
+            tunex = self.devices['tune'].tunex
+            tuney = self.devices['tune'].tuney
+        elif par.meas_tune_method == par.MEAS_TUNE_METHOD.BbBSRAM:
+            tunex = bbbh.sram.spec_marker1_freq
+            tuney = bbbv.sram.spec_marker1_freq
+            tunex /= freq
+            tunet /= freq
+        elif par.meas_tune_method == par.MEAS_TUNE_METHOD.BbBBRAM:
+            tunex = bbbh.bram.spec_marker1_freq
+            tuney = bbbv.bram.spec_marker1_freq
+            tunex /= freq
+            tunet /= freq
+        elif par.meas_tune_method == par.MEAS_TUNE_METHOD.BbB:
+            tunex = bbbh.bram.spec_marker1_freq
+            tuney = bbbv.bram.spec_marker1_freq
+            tunex /= freq
+            tunet /= freq
+
+
 
     def process_data(self, fitorder=1, discardpoints=None):
         """."""
