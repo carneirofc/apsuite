@@ -25,11 +25,13 @@ class TuneScanParams(_ParamsBaseClass):
         self.delta_curr_threshold = 5  # [%]
         self.min_curr_to_inject = 0.5  # [mA]
         self.max_curr = 2.0  # [mA]
+        self.filename = ''
 
     def __str__(self):
         """."""
         ftmp = '{0:15s} = {1:9.6f}  {2:s}\n'.format
         dtmp = '{0:15s} = {1:9d}  {2:s}\n'.format
+        stmp = '{0:15s}: {1:}  {2:s}\n'.format
         stg = ftmp('pos_dtunex', self.pos_dtunex, '')
         stg += ftmp('neg_dtunex', self.neg_dtunex, '')
         stg += ftmp('pos_dtuney', self.pos_dtuney, '')
@@ -42,28 +44,30 @@ class TuneScanParams(_ParamsBaseClass):
         stg += ftmp('delta_curr_threshold', self.delta_curr_threshold, '[%]')
         stg += ftmp('min_curr_to_inject', self.min_curr_to_inject, '[mA]')
         stg += ftmp('max_curr', self.max_curr, '[mA]')
+        stg += stmp('filename', self.filename, '')
         return stg
 
 
 class TuneScanInjSI(_BaseClass):
     """."""
 
-    def __init__(self):
+    def __init__(self, isonline=True):
         """."""
         _BaseClass.__init__(self)
         self.devices = dict()
+        self.data = dict()
+        self.data['measure'] = dict()
         self.params = TuneScanParams()
 
-        self.devices['tune'] = Tune(Tune.DEVICES.SI)
-        self.devices['tunecorr'] = TuneCorr(TuneCorr.DEVICES.SI)
-        self.devices['currinfo'] = CurrInfoSI()
-        self.devices['evg'] = EVG()
-        self.devices['tunecorr'].cmd_update_reference()
-        self.devices['pingh'] = PowerSupplyPU(
-            PowerSupplyPU.DEVICES.SI_INJ_DPKCKR)
-        self.devices['egun'] = EGTriggerPS()
-
-        self.data['measure'] = dict()
+        if isonline:
+            self.devices['tune'] = Tune(Tune.DEVICES.SI)
+            self.devices['tunecorr'] = TuneCorr(TuneCorr.DEVICES.SI)
+            self.devices['currinfo'] = CurrInfoSI()
+            self.devices['evg'] = EVG()
+            self.devices['tunecorr'].cmd_update_reference()
+            self.devices['pingh'] = PowerSupplyPU(
+                PowerSupplyPU.DEVICES.SI_INJ_DPKCKR)
+            self.devices['egun'] = EGTriggerPS()
 
     def turn_on_injsys(self):
         """."""
@@ -85,8 +89,8 @@ class TuneScanInjSI(_BaseClass):
         _time.sleep(1)
 
     def _check_current(self, goal_curr, tol=0.01):
-        dcct_curr = self.devices['currinfo'].current
-        return dcct_curr > goal_curr or abs(dcct_curr - goal_curr) < tol
+        curr = self.devices['currinfo'].current
+        return curr > goal_curr or abs(curr - goal_curr) < tol
 
     def inject_storage_ring(self, goal_curr):
         """."""
@@ -132,7 +136,7 @@ class TuneScanInjSI(_BaseClass):
             print(f'new kick: {newkick:.3f} mrad')
             self.find_max_kick(initial_kick=newkick)
 
-    def scan_tunes(self):
+    def scan_tunes(self, save=True):
         """."""
         nux = _np.linspace(
             -self.params.neg_dtunex,
@@ -146,6 +150,7 @@ class TuneScanInjSI(_BaseClass):
         tunes = list()
         maxkicks = list()
         meas = dict()
+        t0_ = _time.time()
         for valx in nux:
             for valy in nuy:
                 curr = self.devices['currinfo'].current
@@ -165,3 +170,8 @@ class TuneScanInjSI(_BaseClass):
                 meas['tunes'] = tunes
                 meas['maxkicks'] = maxkicks
                 self.data['measure'] = meas
+                if save:
+                    self.save_data(
+                        fname=self.params.filename, overwrite=True)
+        tf_ = _time.time()
+        print(f'Elapsed time: {(tf_-t0_)/60:.2f}min \n')
