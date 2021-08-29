@@ -1,19 +1,23 @@
 """."""
 import time as _time
 import numpy as _np
+import matplotlib.pyplot as _mplt
+import matplotlib.gridspec as _mgs
+
 from siriuspy.devices import Tune, TuneCorr, CurrInfoSI, PowerSupplyPU, \
     EVG, EGTriggerPS, PowerSupply, SOFB
 from siriuspy.namesys import SiriusPVName as _PVName
+from siriuspy.search import PSSearch as _PSSearch
+
 from ..utils import MeasBaseClass as _BaseClass, \
     ParamsBaseClass as _ParamsBaseClass
-import matplotlib.pyplot as _mplt
-import matplotlib.gridspec as _mgs
-from apsuite.optimization import SimulAnneal as _SimulAnneal
-from pymodels import si as _si
+from ..optimization import SimulAnneal as _SimulAnneal
 
 
 class BaseProcess:
     """."""
+
+    DEFAULT_CURR_TOL = 0.01  # [mA]
 
     def __init__(self):
         """."""
@@ -24,6 +28,7 @@ class BaseProcess:
                 PowerSupplyPU.DEVICES.SI_INJ_DPKCKR)
         self.devices['egun'] = EGTriggerPS()
         self.devices['sofb'] = SOFB(SOFB.DEVICES.SI)
+        self.params = None  # used in self.find_max_kick but set in subclasses
 
     def turn_on_injsys(self):
         """."""
@@ -44,45 +49,71 @@ class BaseProcess:
         self.devices['evg'].cmd_update_events()
         _time.sleep(1)
 
-    def _check_current(self, goal_curr, tol=0.01):
+    def check_inj_curr(self, curr_min, curr_max, curr_tol=DEFAULT_CURR_TOL):
+        # current current value
         curr = self.devices['currinfo'].current
-        return curr > goal_curr or abs(curr - goal_curr) < tol
 
-    def inject_storage_ring(self, goal_curr):
+        # inject if current value is below minimum
+        if curr < curr_min:
+            self.inject_storage_ring(curr_max, curr_tol)
+
+    def inject_storage_ring(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
         """."""
+        ftmp = 'Avg. eff.: {:+6.4f} mA / pulse'.format
+        INJ_PERIOD = 0.5  # [s]
+
+        print('Injecting...')
         self.turn_on_injsys()
-        while not self._check_current(goal_curr):
-            _time.sleep(0.2)
-        curr = self.devices['currinfo'].current
-        stg = f'Stored: {curr:.3f}/{goal_curr:.3f} mA.'
-        print(stg)
-        self.turn_off_injsys()
 
-    def find_max_kick(self, initial_kick=None):
+        t0_ = _time.time()
+        curr0 = self.devices['currinfo'].current
+        while True:
+            statusok, curr = self._check_current(curr_goal, curr_tol)
+            if statusok:
+                break
+            # sleep and print avg efficiency
+            _time.sleep(0.4)
+            nr_pulses = (_time.time() - t0_) / INJ_PERIOD
+            eff = (curr - curr0) / nr_pulses
+            print(ftmp(eff))
+
+        self.turn_off_injsys()
+        curr = self.devices['currinfo'].current
+        print(f'Stored: {curr:.3f}/{curr_goal:.3f} mA.')
+
+    def find_max_kick(self, kick_initial=None):
         """."""
+        evg = self.devices['evg']
         pingh = self.devices['pingh']
-        inj = self.devices['evg']
         cinfo = self.devices['currinfo']
 
-        kick0 = initial_kick or self.params.initial_kickx
+        # set trial kick
+        kick0 = kick_initial or self.params.kickx_initial
         pingh.strength = kick0
 
+        # kick PingH and register current loss
         curr0 = cinfo.current
         self.turn_off_injsys()
         pingh.cmd_turn_on_pulse()
-        inj.cmd_turn_on_injection()
+        evg.cmd_turn_on_injection()
         _time.sleep(1)
-        curr = cinfo.current
-        dcurr = (curr-curr0)/curr0 * 100
-        print(f'{dcurr:.2f} % lost with {kick0:.3f} mrad')
+        currf = cinfo.current
+        currd = (currf - curr0) / curr0 * 100
+        print(f'{currd:.2f} % lost with {kick0:.3f} mrad')
 
-        if abs(dcurr) > self.params.delta_curr_threshold:
+        # if current loss within threshold, keep increasing kick amplitude
+        if abs(currd) > self.params.curr_var_threshold:
             print(f'maximum kick reached, {kick0:.3f} mrad')
             return kick0
         else:
             newkick = kick0 + self.params.kickx_incrate
             print(f'new kick: {newkick:.3f} mrad')
-            self.find_max_kick(initial_kick=newkick)
+            self.find_max_kick(kick_initial=newkick)
+
+    def _check_current(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
+        curr = self.devices['currinfo'].current
+        statusok = curr > curr_goal or abs(curr - curr_goal) < curr_tol
+        return statusok, curr
 
 
 class TuneScanParams(_ParamsBaseClass):
@@ -91,39 +122,39 @@ class TuneScanParams(_ParamsBaseClass):
     def __init__(self):
         """."""
         super().__init__()
-        self.pos_dtunex = 0.01
-        self.neg_dtunex = 0.01
-        self.pos_dtuney = 0.01
-        self.neg_dtuney = 0.01
-        self.npts_dtunex = 3
-        self.npts_dtuney = 3
+        self.dtunex_pos = 0.01
+        self.dtunex_neg = 0.01
+        self.dtuney_pos = 0.01
+        self.dtuney_neg = 0.01
+        self.dtunex_npts = 3
+        self.dtuney_npts = 3
         self.wait_tunecorr = 1  # [s]
-        self.initial_kickx = -0.500  # [mrad]
+        self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
-        self.delta_curr_threshold = 5  # [%]
-        self.min_curr_to_inject = 0.5  # [mA]
-        self.max_curr = 2.0  # [mA]
+        self.curr_var_threshold = 5  # [%]
+        self.curr_min = 0.5  # [mA]
+        self.curr_max = 2.0  # [mA]
         self.nr_orbit_corr = 5
         self.filename = ''
 
     def __str__(self):
         """."""
+        dtmp = '{0:15s} = {1:9d}\n'.format
         ftmp = '{0:15s} = {1:9.6f}  {2:s}\n'.format
-        dtmp = '{0:15s} = {1:9d}  {2:s}\n'.format
         stmp = '{0:15s}: {1:}  {2:s}\n'.format
-        stg = ftmp('pos_dtunex', self.pos_dtunex, '')
-        stg += ftmp('neg_dtunex', self.neg_dtunex, '')
-        stg += ftmp('pos_dtuney', self.pos_dtuney, '')
-        stg += ftmp('neg_dtuney', self.neg_dtuney, '')
-        stg += dtmp('npts_tunex', self.npts_dtunex, '')
-        stg += dtmp('npts_tuney', self.npts_dtuney, '')
-        stg += ftmp('initial_kickx', self.initial_kickx, '[mrad]')
-        stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
-        stg += ftmp('delta_curr_threshold', self.delta_curr_threshold, '[%]')
-        stg += ftmp('min_curr_to_inject', self.min_curr_to_inject, '[mA]')
-        stg += ftmp('max_curr', self.max_curr, '[mA]')
+        stg = ftmp('dtunex_pos', self.dtunex_pos, '')
+        stg += ftmp('dtunex_neg', self.dtunex_neg, '')
+        stg += ftmp('dtuney_pos', self.dtuney_pos, '')
+        stg += ftmp('dtuney_neg', self.dtuney_neg, '')
+        stg += dtmp('dtunex_npts', self.dtunex_npts)
+        stg += dtmp('dtuney_npts', self.dtuney_npts)
         stg += ftmp('wait_tunecorr', self.wait_tunecorr, '[s]')
-        stg += dtmp('nr_orbit_corr', self.nr_orbit_corr, '')
+        stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
+        stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
+        stg += ftmp('curr_var_threshold', self.curr_var_threshold, '[%]')
+        stg += ftmp('curr_min', self.curr_min, '[mA]')
+        stg += ftmp('curr_max', self.curr_max, '[mA]')
+        stg += dtmp('nr_orbit_corr', self.nr_orbit_corr)
         stg += stmp('filename', self.filename, '')
         return stg
 
@@ -135,8 +166,7 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
         """."""
         _BaseClass.__init__(self)
         BaseProcess.__init__(self)
-        self.data = dict()
-        self.data['measure'] = dict()
+        self.data = dict(measure=dict())
         self.params = TuneScanParams()
 
         if isonline:
@@ -154,45 +184,22 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
 
     def scan_tunes(self, save=True):
         """."""
-        nux = _np.linspace(
-            -self.params.neg_dtunex,
-            +self.params.pos_dtunex,
-            self.params.npts_dtunex)
-        nuy = _np.linspace(
-            -self.params.neg_dtuney,
-            +self.params.pos_dtuney,
-            self.params.npts_dtuney)
+        parms, lspc = self.params, _np.linspace
+        dnuxv = lspc(-parms.dtunex_neg, +parms.dtunex_pos, parms.dtunex_npts)
+        dnuyv = lspc(-parms.dtuney_neg, +parms.dtuney_pos, parms.dtuney_npts)
 
-        tunes = list()
-        maxkicks = list()
-        meas = dict()
         t0_ = _time.time()
-        for valx in nux:
-            for valy in nuy:
-                curr = self.devices['currinfo'].current
-                if curr < self.params.min_curr_to_inject:
-                    self.inject_storage_ring(
-                        goal_curr=self.params.max_curr)
-                self.apply_tune_variation(dnux=valx, dnuy=valy)
-                self.devices['sofb'].correct_orbit_manually(
-                    self.params.nr_orbit_corr)
-                mnux = self.devices['tune'].tunex
-                mnuy = self.devices['tune'].tuney
-                stg = f'nux={mnux:.4f}, nuy={mnuy:.4f}'
-                print(stg)
-                maxkick = self.find_max_kick()
-                print('='*50)
-                tunes.append((mnux, mnuy))
-                maxkicks.append(maxkick)
-
-                meas['tunes'] = tunes
-                meas['maxkicks'] = maxkicks
-                self.data['measure'] = meas
+        self.data['time'] = t0_
+        self.data['measure'] = dict(tunes=[], maxkicks=[])
+        for dnux in dnuxv:
+            for dnuy in dnuyv:
+                # measure max kick for (dnux, dnuy), add data and save it
+                self._measure_max_kick(self.data['measure'], dnux, dnuy)
                 if save:
                     self.save_data(
-                        fname=self.params.filename, overwrite=True)
+                        fname=parms.filename, overwrite=True)
         tf_ = _time.time()
-        print(f'Elapsed time: {(tf_-t0_)/60:.2f}min \n')
+        print(f'Elapsed time: {(tf_ - t0_) / 60:.2f} min \n')
 
     def plot_results(self, fname, title):
         """."""
@@ -211,101 +218,113 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
             fig.savefig(fname, format='png', dpi=300)
         return fig
 
+    def _measure_max_kick(self, meas, dnux, dnuy):
+        parms, devices = self.params, self.devices
 
-class SextScanParams(_ParamsBaseClass):
+        # check if minimal current is satisfied, inject if necessary
+        self.check_inj_curr(parms.curr_min, parms.curr_max)
+
+        # apply tune variation and correct orbit
+        self.apply_tune_variation(dnux=dnux, dnuy=dnuy)
+        devices['sofb'].correct_orbit_manually(parms.nr_orbit_corr)
+
+        # register actual tunes and print info
+        mnux = devices['tune'].tunex
+        mnuy = devices['tune'].tuney
+        stg = f'nux={mnux:.4f}, nuy={mnuy:.4f}'
+        print(stg)
+
+        # measure maximum kick and store data
+        maxkick = self.find_max_kick()
+        print('='*len(stg))
+        meas['tunes'].append((mnux, mnuy))
+        meas['maxkicks'].append(maxkick)
+
+
+class SextSearchParams(_ParamsBaseClass):
     """."""
 
     def __init__(self):
         """."""
         super().__init__()
-        self.pos_dstrength = 10  # [%]
-        self.neg_dstrength = 10  # [%]
         self.niter = 10
-        self.initial_kickx = -0.500  # [mrad]
+        self.dstrength_pos = 10  # [%]
+        self.dstrength_neg = 10  # [%]
+        self.wait_sextupoles = 2  # [s]
+        self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
-        self.delta_curr_threshold = 5  # [%]
-        self.min_curr_to_inject = 0.5  # [mA]
-        self.max_curr = 2.0  # [mA]
-        self.wait_sextupoles = 3  # [s]
+        self.curr_var_threshold = 5  # [%]
+        self.curr_min = 0.5  # [mA]
+        self.curr_max = 2.0  # [mA]
         self.nr_orbit_corr = 5
         self.filename = ''
 
     def __str__(self):
         """."""
+        dtmp = '{0:15s} = {1:9d}\n'.format
         ftmp = '{0:15s} = {1:9.6f}  {2:s}\n'.format
-        dtmp = '{0:15s} = {1:9d}  {2:s}\n'.format
         stmp = '{0:15s}: {1:}  {2:s}\n'.format
-        stg = ftmp('pos_dstrength', self.pos_dstrength, '[%]')
-        stg += ftmp('neg_dstrength', self.neg_dstrength, '[%]')
-        stg += dtmp('niter', self.niter, '')
-        stg += ftmp('initial_kickx', self.initial_kickx, '[mrad]')
-        stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
-        stg += ftmp('delta_curr_threshold', self.delta_curr_threshold, '[%]')
-        stg += ftmp('min_curr_to_inject', self.min_curr_to_inject, '[mA]')
-        stg += ftmp('max_curr', self.max_curr, '[mA]')
+        stg = dtmp('niter', self.niter)
+        stg += ftmp('dstrength_pos', self.dstrength_pos, '[%]')
+        stg += ftmp('dstrength_neg', self.dstrength_neg, '[%]')
         stg += ftmp('wait_sextupoles', self.wait_sextupoles, '[s]')
-        stg += dtmp('nr_orbit_corr', self.nr_orbit_corr, '')
+        stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
+        stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
+        stg += ftmp('curr_var_threshold', self.curr_var_threshold, '[%]')
+        stg += ftmp('curr_min', self.curr_min, '[mA]')
+        stg += ftmp('curr_max', self.curr_max, '[mA]')
+        stg += dtmp('nr_orbit_corr', self.nr_orbit_corr)
         stg += stmp('filename', self.filename, '')
         return stg
 
 
-class SextScanInjSI(_SimulAnneal, _BaseClass, BaseProcess):
+class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
     """."""
 
-    def __init__(self, isonline):
+    def __init__(self, isonline=True):
         """."""
         _SimulAnneal.__init__(self, save=True)
         _BaseClass.__init__(self)
         BaseProcess.__init__(self)
-        self.data = dict()
-        self.data['measure'] = dict()
-        self.params = SextScanParams()
-        pvstr = 'SI-Fam:PS-'
-        slist = _si.families.families_sextupoles()
-        self.sext_names = [_PVName(pvstr+mag) for mag in slist if '0' in mag]
+        self.data = dict(measure=dict())
+        self.params = SextSearchParams()
+
+        # get achromatic sextupole power supply family names
+        psnames = _PSSearch.get_psnames({'sec':'SI', 'dev':'S.*0'})
+        self.psnames = [_PVName(psname) for psname in psnames]
+
         if isonline:
-            for sext in self.sext_names:
-                self.devices[sext] = PowerSupply(sext)
+            for psname in self.psnames:
+                self.devices[psname] = PowerSupply(psname)
             self.initial_strengths = self.get_initial_strengths()
+
         self.data['measure']['initial_strengths'] = self.initial_strengths
-        self.data['measure']['sext_names'] = self.sext_names
+        self.data['measure']['psnames'] = self.psnames
 
     def initialization(self):
         """."""
-        self.niter = self.params.nr_iter
-        nknobs = self.sext_names.size
+        self.niter = self.params.niter
+        nknobs = len(self.psnames)
         self.position = _np.zeros(nknobs)
-        self.limits_upper = _np.ones(nknobs)*self.params.pos_dstrength
-        self.limits_lower = -_np.ones(nknobs)*self.params.neg_dstrength
+        self.limits_upper = _np.ones(nknobs)*self.params.dstrength_pos
+        self.limits_lower = -_np.ones(nknobs)*self.params.dstrength_neg
         self.deltas = (self.limits_upper-self.limits_lower)
 
     def get_initial_strengths(self):
         """."""
         strens = []
-        for sext in self.sext_names:
-            strens.append(self.devices[sext].strength)
+        for psname in self.psnames:
+            strens.append(self.devices[psname].strength)
         return strens
 
     def apply_strengths(self, strengths):
         """."""
-        for idx, sext in enumerate(self.sext_names):
-            self.devices[sext].strength = strengths[idx]
-
-    def _change_sextupoles(self):
-        """."""
-        strens = self.position
-        new_strens = self.initial_strengths * (1 + strens/100)
-        self.apply_strengths(strengths=new_strens)
+        for psname, strength in zip(self.psnames, strengths):
+            self.devices[psname].strength = strength
 
     def calc_obj_fun(self):
         """."""
-        curr = self.devices['currinfo'].current
-        if curr < self.params.min_curr_to_inject:
-            self.inject_storage_ring(goal_curr=self.params.max_curr)
-        self._change_sextupoles()
-        _time.sleep(self.params.wait_sextupoles_change)
-        self.devices['sofb'].correct_orbit_manually(self.params.nr_orbit_corr)
-        return self.find_max_kick()
+        return self._measure_max_kick()
 
     def save_data(self, fname, overwrite):
         """."""
@@ -326,13 +345,12 @@ class SextScanInjSI(_SimulAnneal, _BaseClass, BaseProcess):
 
     def print_sextupoles_changes(self, strengths):
         """."""
-        stren0 = self.initial_strengths
-        for idx, sext in enumerate(self.sext_names):
-            diff = strengths[idx]-stren0[idx]
-            diff /= stren0[idx]
-            stg = f'{sext:s}: {stren0[idx]:.4f} 1/m² -> '
-            stg += f'{strengths[idx]:.4f} 1/m² '
-            stg += f'({diff*100:.4f} %)'
+        stren0v = self.initial_strengths
+        strenfv = strengths
+        for psname, stren0, strenf in zip(self.psnames, stren0v, strenfv):
+            diff = 100 * (strenf - stren0) / stren0
+            stg = f'{psname:s}: {stren0:.4f} 1/m² -> '
+            stg += f'{strenf:.4f} 1/m² ({diff:+.4f} %)'
             print(stg)
 
     def plot_optimization(self, fname, title):
@@ -341,9 +359,30 @@ class SextScanInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         gs = _mgs.GridSpec(1, 1)
         ax = fig.add_subplot(gs[0, 0])
         ax.plot(self.data['measure']['hist_best_maxkicks'])
-        ax.set_ylabel('H. Pinger kick [mrad]')
+        ax.set_ylabel('HPinger kick [mrad]')
         ax.set_xlabel('iteration')
         ax.set_title(title)
         if fname:
             fig.savefig(fname, format='png', dpi=300)
         return fig
+
+    def _change_sextupoles(self, sleep=True):
+        """."""
+        strens = self.position
+        new_strens = self.initial_strengths * (1 + strens/100)
+        self.apply_strengths(strengths=new_strens)
+        if sleep:
+            _time.sleep(self.params.wait_sextupoles_change)
+
+    def _measure_max_kick(self):
+        parms, devices = self.params, self.devices
+
+        # check if minimal current is satisfied, inject if necessary
+        self.check_inj_curr(parms.curr_min, parms.curr_max)
+
+        # apply sextupole variation and correct orbit
+        self._change_sextupoles(sleep=True)
+        devices['sofb'].correct_orbit_manually(parms.nr_orbit_corr)
+
+        # measure maximum kick and return
+        return self.find_max_kick()
