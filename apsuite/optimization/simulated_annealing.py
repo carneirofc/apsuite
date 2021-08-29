@@ -258,6 +258,7 @@ class SimulAnneal:
 
     def _check_lim(self):
         # If particle position exceeds the boundary, set the boundary value
+        # [per-direction limits can be implemented using 'np.inf']
         if self._pos_lim_upper is not None:
             over = self._position > self._pos_lim_upper
             self._position[over] = self._pos_lim_upper[over]
