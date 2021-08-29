@@ -15,9 +15,12 @@ class SimulAnneal:
 
         # search space
         self._position = _np.array([])
+        self._pos_delta_max = None
+        # per-direction limits can be implemented using '± np.inf' for all 
+        # components but those with finite limits. None: no limits.
         self._pos_lim_lower = None
         self._pos_lim_upper = None
-        self._pos_delta_max = None
+
 
         # search control
         self._niter = 0
@@ -258,7 +261,6 @@ class SimulAnneal:
 
     def _check_lim(self):
         # If particle position exceeds the boundary, set the boundary value
-        # [per-direction limits can be implemented using 'np.inf']
         if self._pos_lim_upper is not None:
             over = self._position > self._pos_lim_upper
             self._position[over] = self._pos_lim_upper[over]
