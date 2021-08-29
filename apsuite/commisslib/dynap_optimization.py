@@ -18,6 +18,7 @@ class BaseProcess:
     """."""
 
     DEFAULT_CURR_TOL = 0.01  # [mA]
+    INJ_PERIOD = 0.5  # [s]
 
     def __init__(self):
         """."""
@@ -50,6 +51,7 @@ class BaseProcess:
         _time.sleep(1)
 
     def check_inj_curr(self, curr_min, curr_max, curr_tol=DEFAULT_CURR_TOL):
+        """."""
         # current current value
         curr = self.devices['currinfo'].current
 
@@ -60,7 +62,6 @@ class BaseProcess:
     def inject_storage_ring(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
         """."""
         ftmp = 'Avg. eff.: {:+6.4f} mA / pulse'.format
-        INJ_PERIOD = 0.5  # [s]
 
         print('Injecting...')
         self.turn_on_injsys()
@@ -73,7 +74,7 @@ class BaseProcess:
                 break
             # sleep and print avg efficiency
             _time.sleep(0.4)
-            nr_pulses = (_time.time() - t0_) / INJ_PERIOD
+            nr_pulses = (_time.time() - t0_) / BaseProcess.INJ_PERIOD
             eff = (curr - curr0) / nr_pulses
             print(ftmp(eff))
 
