@@ -27,6 +27,15 @@ class BaseProcess:
         self.devices['evg'] = EVG()
         self.devices['pingh'] = PowerSupplyPU(
                 PowerSupplyPU.DEVICES.SI_INJ_DPKCKR)
+        self.devices['tsinjseptf'] = \
+            PowerSupplyPU(PowerSupplyPU.DEVICES.TS_INJ_SPETF)
+        self.devices['tsinjseptg1'] = \
+            PowerSupplyPU(PowerSupplyPU.DEVICES.TS_INJ_SPETG_1)
+        self.devices['tsinjseptg2'] = \
+            PowerSupplyPU(PowerSupplyPU.DEVICES.TS_INJ_SPETG_2)
+        self.devices['nlk'] = \
+            PowerSupplyPU(PowerSupplyPU.DEVICES.SI_INJ_NLKCKR)
+
         self.devices['egun'] = EGTriggerPS()
         self.devices['sofb'] = SOFB(SOFB.DEVICES.SI)
         self.params = None  # used in self.find_max_kick but set in subclasses
@@ -34,6 +43,10 @@ class BaseProcess:
     def turn_on_injsys(self):
         """."""
         self.devices['pingh'].cmd_turn_off_pulse()
+        self.devices['tsinjseptf'].cmd_turn_on_pulse()
+        self.devices['tsinjseptg1'].cmd_turn_on_pulse()
+        self.devices['tsinjseptg2'].cmd_turn_on_pulse()
+        self.devices['nlk'].cmd_turn_on_pulse()
         self.devices['egun'].cmd_enable_trigger()
         self.devices['evg'].bucket_list = [1]
         self.devices['evg'].nrpulses = 0
@@ -43,6 +56,10 @@ class BaseProcess:
 
     def turn_off_injsys(self):
         """."""
+        self.devices['tsinjseptf'].cmd_turn_off_pulse()
+        self.devices['tsinjseptg1'].cmd_turn_off_pulse()
+        self.devices['tsinjseptg2'].cmd_turn_off_pulse()
+        self.devices['nlk'].cmd_turn_off_pulse()
         self.devices['egun'].cmd_disable_trigger()
         self.devices['evg'].cmd_turn_off_injection()
         self.devices['evg'].bucket_list = [1]
@@ -57,6 +74,7 @@ class BaseProcess:
 
         # inject if current value is below minimum
         if curr < curr_min:
+            self._restore_position()
             self.inject_storage_ring(curr_max, curr_tol)
 
     def inject_storage_ring(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
@@ -81,6 +99,7 @@ class BaseProcess:
         self.turn_off_injsys()
         curr = self.devices['currinfo'].current
         print(f'Stored: {curr:.3f}/{curr_goal:.3f} mA.')
+        print()
 
     def find_max_kick(self, kick_initial=None):
         """."""
@@ -89,7 +108,7 @@ class BaseProcess:
         cinfo = self.devices['currinfo']
 
         # set trial kick
-        kick0 = kick_initial or self.params.kickx_initial
+        kick0 = kick_initial or self.params.kick_initial
         pingh.strength = kick0
 
         # kick PingH and register current loss
@@ -97,24 +116,28 @@ class BaseProcess:
         self.turn_off_injsys()
         pingh.cmd_turn_on_pulse()
         evg.cmd_turn_on_injection()
-        _time.sleep(1)
+        _time.sleep(2)
         currf = cinfo.current
         currd = (currf - curr0) / curr0 * 100
+        print(f'{curr0:.3f} mA --> {currf:.3f} mA')
         print(f'{currd:.2f} % lost with {kick0:.3f} mrad')
 
         # if current loss within threshold, keep increasing kick amplitude
         if abs(currd) > self.params.curr_var_threshold:
             print(f'maximum kick reached, {kick0:.3f} mrad')
-            return kick0
+            return kick0, currd
         else:
             newkick = kick0 + self.params.kickx_incrate
             print(f'new kick: {newkick:.3f} mrad')
-            self.find_max_kick(kick_initial=newkick)
+            return self.find_max_kick(kick_initial=newkick)
 
     def _check_current(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
         curr = self.devices['currinfo'].current
         statusok = curr > curr_goal or abs(curr - curr_goal) < curr_tol
         return statusok, curr
+
+    def _restore_position(self):
+        raise NotImplementedError
 
 
 class TuneScanParams(_ParamsBaseClass):
@@ -186,33 +209,40 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
     def scan_tunes(self, save=True):
         """."""
         parms, lspc = self.params, _np.linspace
-        dnuxv = lspc(-parms.dtunex_neg, +parms.dtunex_pos, parms.dtunex_npts)
-        dnuyv = lspc(-parms.dtuney_neg, +parms.dtuney_pos, parms.dtuney_npts)
+        dnuxv = lspc(parms.dtunex_neg, +parms.dtunex_pos, parms.dtunex_npts)
+        dnuyv = lspc(parms.dtuney_neg, +parms.dtuney_pos, parms.dtuney_npts)
 
         t0_ = _time.time()
         self.data['time'] = t0_
-        self.data['measure'] = dict(tunes=[], maxkicks=[])
+        self.data['measure'] = \
+            dict(tunes=[], maxkicks=[], lostcurr=[], dtunes=[])
+
+        nux0 = self.devices['tune'].tunex
+        nuy0 = self.devices['tune'].tuney
+        self.data['measure']['tunes_initial'] = (nux0, nuy0)
         for dnux in dnuxv:
             for dnuy in dnuyv:
                 # measure max kick for (dnux, dnuy), add data and save it
                 self._measure_max_kick(self.data['measure'], dnux, dnuy)
+                print('')
                 if save:
                     self.save_data(
                         fname=parms.filename, overwrite=True)
+        self.apply_tune_variation(dnux=0, dnuy=0)
         tf_ = _time.time()
         print(f'Elapsed time: {(tf_ - t0_) / 60:.2f} min \n')
 
     def plot_results(self, fname=None, title=''):
         """."""
-        tunes = self.data['measure']['tunes']
+        dtunes = self.data['measure']['dtunes']
         kicks = self.data['measure']['maxkicks']
-        tunestr = [f'({val[0]:.4f},{val[1]:.4f})' for val in tunes]
+        dtunestr = [f'({val[0]:.4f},{val[1]:.4f})' for val in dtunes]
 
         fig = _mplt.figure(figsize=(14, 6))
         gs = _mgs.GridSpec(1, 1)
         ax = fig.add_subplot(gs[0, 0])
-        ax.bar(tunestr, kicks)
-        ax.set_ylabel('Time [ms]')
+        ax.bar(dtunestr, kicks)
+        ax.set_ylabel('HKick [mrad]')
         ax.set_xlabel('Current [mA]')
         ax.set_title(title)
         if fname:
@@ -232,14 +262,21 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
         # register actual tunes and print info
         mnux = devices['tune'].tunex
         mnuy = devices['tune'].tuney
-        stg = f'nux={mnux:.4f}, nuy={mnuy:.4f}'
+        # stg = f'nux={mnux:.4f}, nuy={mnuy:.4f}'
+        stg = f'dnux={dnux:.4f}, dnuy={dnuy:.4f}'
         print(stg)
 
         # measure maximum kick and store data
-        maxkick = self.find_max_kick()
-        print('='*len(stg))
+        maxkick, lostcurr = \
+            self.find_max_kick(kick_initial=self.params.kickx_initial)
+        print('='*len(stg)*2)
         meas['tunes'].append((mnux, mnuy))
+        meas['dtunes'].append((dnux, dnuy))
         meas['maxkicks'].append(maxkick)
+        meas['lostcurr'].append(lostcurr)
+
+    def _restore_position(self):
+        self.apply_tune_variation(dnux=0, dnuy=0)
 
 
 class SextSearchParams(_ParamsBaseClass):
@@ -392,3 +429,6 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
 
         # measure maximum kick and return
         return self.find_max_kick()
+
+    def _restore_position(self):
+        self.apply_initial_strengths()
