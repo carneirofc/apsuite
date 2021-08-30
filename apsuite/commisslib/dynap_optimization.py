@@ -140,9 +140,9 @@ class TuneScanParams(_ParamsBaseClass):
 
     def __str__(self):
         """."""
-        dtmp = '{0:15s} = {1:9d}\n'.format
-        ftmp = '{0:15s} = {1:9.6f}  {2:s}\n'.format
-        stmp = '{0:15s}: {1:}  {2:s}\n'.format
+        dtmp = '{0:20s} = {1:9d}\n'.format
+        ftmp = '{0:20s} = {1:9.4f}  {2:s}\n'.format
+        stmp = '{0:20s} = {1:}  {2:s}\n'.format
         stg = ftmp('dtunex_pos', self.dtunex_pos, '')
         stg += ftmp('dtunex_neg', self.dtunex_neg, '')
         stg += ftmp('dtuney_pos', self.dtuney_pos, '')
@@ -202,7 +202,7 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
         tf_ = _time.time()
         print(f'Elapsed time: {(tf_ - t0_) / 60:.2f} min \n')
 
-    def plot_results(self, fname, title):
+    def plot_results(self, fname=None, title=''):
         """."""
         tunes = self.data['measure']['tunes']
         kicks = self.data['measure']['maxkicks']
@@ -262,9 +262,9 @@ class SextSearchParams(_ParamsBaseClass):
 
     def __str__(self):
         """."""
-        dtmp = '{0:15s} = {1:9d}\n'.format
-        ftmp = '{0:15s} = {1:9.6f}  {2:s}\n'.format
-        stmp = '{0:15s}: {1:}  {2:s}\n'.format
+        dtmp = '{0:20s} = {1:9d}\n'.format
+        ftmp = '{0:20s} = {1:9.4f}  {2:s}\n'.format
+        stmp = '{0:20s} = {1:}  {2:s}\n'.format
         stg = dtmp('niter', self.niter)
         stg += ftmp('dstrength_pos', self.dstrength_pos, '[%]')
         stg += ftmp('dstrength_neg', self.dstrength_neg, '[%]')
@@ -291,7 +291,7 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         self.params = SextSearchParams()
 
         # get achromatic sextupole power supply family names
-        psnames = _PSSearch.get_psnames({'sec':'SI', 'dev':'S.*0'})
+        psnames = _PSSearch.get_psnames({'sec': 'SI', 'dev': 'S.*0'})
         self.psnames = [_PVName(psname) for psname in psnames]
 
         if isonline:
@@ -338,10 +338,15 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         """."""
         self.apply_strengths(strengths=self.initial_strengths)
 
-    def apply_optimized_strengths(self):
+    def get_optimized_strengths(self):
         """."""
         best_strens = self.initial_strengths
         best_strens *= (1 + self.hist_best_positions[-1, :]/100)
+        return best_strens
+
+    def apply_optimized_strengths(self):
+        """."""
+        best_strens = self.get_optimized_strengths()
         self.apply_strengths(strengths=best_strens)
 
     def print_sextupoles_changes(self, strengths):
@@ -354,7 +359,7 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
             stg += f'{strenf:.4f} 1/m² ({diff:+.4f} %)'
             print(stg)
 
-    def plot_optimization(self, fname, title):
+    def plot_optimization(self, fname=None, title=''):
         """."""
         fig = _mplt.figure(figsize=(14, 6))
         gs = _mgs.GridSpec(1, 1)
