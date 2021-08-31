@@ -16,7 +16,7 @@ class SimulAnneal:
         # search space
         self._position = _np.array([])
         self._pos_delta_max = None
-        # per-direction limits can be implemented using '± np.inf' for all 
+        # per-direction limits can be implemented using '± np.inf' for all
         # components but those with finite limits. None: no limits.
         self._pos_lim_lower = None
         self._pos_lim_upper = None
@@ -119,7 +119,7 @@ class SimulAnneal:
     def start(self, print_flag=True):
         """."""
         if self._use_thread:
-            if not self._thread.is_alive():
+            if self._thread is None or not self._thread.is_alive():
                 self._thread = _Thread(
                     target=self._optimize, args=(print_flag, ), daemon=True)
                 self._stopevt.clear()
