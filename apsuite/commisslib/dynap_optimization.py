@@ -319,7 +319,7 @@ class SextSearchParams(_ParamsBaseClass):
 class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
     """."""
 
-    def __init__(self, isonline=True):
+    def __init__(self, isonline=True, use_thread=True):
         """."""
         _BaseClass.__init__(self)
         BaseProcess.__init__(self)
@@ -330,7 +330,7 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         psnames = _PSSearch.get_psnames({'sec': 'SI', 'dev': 'S.*0'})
         self.psnames = [_PVName(psname) for psname in psnames]
 
-        _SimulAnneal.__init__(self, save=True)
+        _SimulAnneal.__init__(self, save=True, use_thread=use_thread)
 
         if isonline:
             for psname in self.psnames:
@@ -416,7 +416,7 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         new_strens = self.initial_strengths * (1 + strens/100)
         self.apply_strengths(strengths=new_strens)
         if sleep:
-            _time.sleep(self.params.wait_sextupoles_change)
+            _time.sleep(self.params.wait_sextupoles)
 
     def _measure_max_kick(self):
         parms, devices = self.params, self.devices
