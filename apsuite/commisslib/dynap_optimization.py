@@ -101,14 +101,14 @@ class BaseProcess:
         print(f'Stored: {curr:.3f}/{curr_goal:.3f} mA.')
         print()
 
-    def find_max_kick(self, kick_initial=None):
+    def find_max_kick(self, kickx_initial=None):
         """."""
         evg = self.devices['evg']
         pingh = self.devices['pingh']
         cinfo = self.devices['currinfo']
 
         # set trial kick
-        kick0 = kick_initial or self.params.kick_initial
+        kick0 = kickx_initial or self.params.kickx_initial
         pingh.strength = kick0
 
         # kick PingH and register current loss
@@ -129,7 +129,7 @@ class BaseProcess:
         else:
             newkick = kick0 + self.params.kickx_incrate
             print(f'new kick: {newkick:.3f} mrad')
-            return self.find_max_kick(kick_initial=newkick)
+            return self.find_max_kick(kickx_initial=newkick)
 
     def _check_current(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
         curr = self.devices['currinfo'].current
@@ -268,7 +268,7 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
 
         # measure maximum kick and store data
         maxkick, lostcurr = \
-            self.find_max_kick(kick_initial=self.params.kickx_initial)
+            self.find_max_kick(kickx_initial=self.params.kickx_initial)
         print('='*len(stg)*2)
         meas['tunes'].append((mnux, mnuy))
         meas['dtunes'].append((dnux, dnuy))
