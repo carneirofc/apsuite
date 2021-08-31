@@ -325,11 +325,12 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         BaseProcess.__init__(self)
         self.data = dict(measure=dict())
         self.params = SextSearchParams()
-        _SimulAnneal.__init__(self, save=True)
 
         # get achromatic sextupole power supply family names
         psnames = _PSSearch.get_psnames({'sec': 'SI', 'dev': 'S.*0'})
         self.psnames = [_PVName(psname) for psname in psnames]
+
+        _SimulAnneal.__init__(self, save=True)
 
         if isonline:
             for psname in self.psnames:
