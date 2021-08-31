@@ -146,10 +146,10 @@ class TuneScanParams(_ParamsBaseClass):
     def __init__(self):
         """."""
         super().__init__()
-        self.dtunex_pos = 0.01
-        self.dtunex_neg = 0.01
-        self.dtuney_pos = 0.01
-        self.dtuney_neg = 0.01
+        self.dtunex_beg = 0.01
+        self.dtunex_end = 0.01
+        self.dtuney_beg = 0.01
+        self.dtuney_end = 0.01
         self.dtunex_npts = 3
         self.dtuney_npts = 3
         self.wait_tunecorr = 1  # [s]
@@ -166,10 +166,10 @@ class TuneScanParams(_ParamsBaseClass):
         dtmp = '{0:20s} = {1:9d}\n'.format
         ftmp = '{0:20s} = {1:9.4f}  {2:s}\n'.format
         stmp = '{0:20s} = {1:}  {2:s}\n'.format
-        stg = ftmp('dtunex_pos', self.dtunex_pos, '')
-        stg += ftmp('dtunex_neg', self.dtunex_neg, '')
-        stg += ftmp('dtuney_pos', self.dtuney_pos, '')
-        stg += ftmp('dtuney_neg', self.dtuney_neg, '')
+        stg = ftmp('dtunex_beg', self.dtunex_beg, '')
+        stg += ftmp('dtunex_end', self.dtunex_end, '')
+        stg += ftmp('dtuney_beg', self.dtuney_beg, '')
+        stg += ftmp('dtuney_end', self.dtuney_end, '')
         stg += dtmp('dtunex_npts', self.dtunex_npts)
         stg += dtmp('dtuney_npts', self.dtuney_npts)
         stg += ftmp('wait_tunecorr', self.wait_tunecorr, '[s]')
@@ -209,8 +209,8 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
     def scan_tunes(self, save=True):
         """."""
         parms, lspc = self.params, _np.linspace
-        dnuxv = lspc(parms.dtunex_neg, +parms.dtunex_pos, parms.dtunex_npts)
-        dnuyv = lspc(parms.dtuney_neg, +parms.dtuney_pos, parms.dtuney_npts)
+        dnuxv = lspc(parms.dtunex_beg, +parms.dtunex_end, parms.dtunex_npts)
+        dnuyv = lspc(parms.dtuney_beg, +parms.dtuney_end, parms.dtuney_npts)
 
         t0_ = _time.time()
         self.data['time'] = t0_
@@ -286,8 +286,8 @@ class SextSearchParams(_ParamsBaseClass):
         """."""
         super().__init__()
         self.niter = 10
-        self.dstrength_pos = 10  # [%]
-        self.dstrength_neg = 10  # [%]
+        self.dstrength_beg = 10  # [%]
+        self.dstrength_end = 10  # [%]
         self.wait_sextupoles = 2  # [s]
         self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
@@ -303,8 +303,8 @@ class SextSearchParams(_ParamsBaseClass):
         ftmp = '{0:20s} = {1:9.4f}  {2:s}\n'.format
         stmp = '{0:20s} = {1:}  {2:s}\n'.format
         stg = dtmp('niter', self.niter)
-        stg += ftmp('dstrength_pos', self.dstrength_pos, '[%]')
-        stg += ftmp('dstrength_neg', self.dstrength_neg, '[%]')
+        stg += ftmp('dstrength_beg', self.dstrength_beg, '[%]')
+        stg += ftmp('dstrength_end', self.dstrength_end, '[%]')
         stg += ftmp('wait_sextupoles', self.wait_sextupoles, '[s]')
         stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
         stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
@@ -344,8 +344,8 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         self.niter = self.params.niter
         nknobs = len(self.psnames)
         self.position = _np.zeros(nknobs)
-        self.limits_upper = _np.ones(nknobs)*self.params.dstrength_pos
-        self.limits_lower = -_np.ones(nknobs)*self.params.dstrength_neg
+        self.limits_lower = _np.ones(nknobs)*self.params.dstrength_beg
+        self.limits_upper = _np.ones(nknobs)*self.params.dstrength_end
         self.deltas = (self.limits_upper-self.limits_lower)
 
     def get_initial_strengths(self):
