@@ -157,6 +157,8 @@ class SimulAnneal:
         p_old, f_old = _np.copy(self._position), self.calc_obj_fun()
         bpos_hstry[0, :] = p_old
         bfig_hstry[0] = f_old
+        self.hist_best_positions = bpos_hstry
+        self.hist_best_objfunc = bfig_hstry
 
         # Number of accepted and unaccepted solutions.
         nr_acc, nr_unacc = 0, 0
@@ -200,6 +202,8 @@ class SimulAnneal:
                 p_old, f_old = _np.copy(self._position), f_new
                 bpos_hstry[nr_acc, :] = self._position
                 bfig_hstry[nr_acc] = f_old
+                self.hist_best_positions = bpos_hstry
+                self.hist_best_objfunc = bfig_hstry
                 if print_flag:
                     print('Better solution found! Obj. Func: '
                           '{:5f}'.format(f_old))

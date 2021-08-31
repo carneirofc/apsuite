@@ -101,30 +101,43 @@ class BaseProcess:
         print(f'Stored: {curr:.3f}/{curr_goal:.3f} mA.')
         print()
 
-    def find_max_kick(self, kickx_initial=None):
+    def kick_and_get_current(self, kickx=None, kickx_nr=1):
         """."""
-        evg = self.devices['evg']
+        # kick PingH and register current loss
         pingh = self.devices['pingh']
+        evg = self.devices['evg']
         cinfo = self.devices['currinfo']
 
-        # set trial kick
-        kick0 = kickx_initial or self.params.kickx_initial
-        pingh.strength = kick0
+        if kickx is not None:
+            pingh.strength = kickx
 
-        # kick PingH and register current loss
+        kickapp = pingh.strength
         curr0 = cinfo.current
         self.turn_off_injsys()
         pingh.cmd_turn_on_pulse()
-        evg.cmd_turn_on_injection()
-        _time.sleep(2)
+
+        for _ in range(kickx_nr):
+            evg.cmd_turn_on_injection()
+            _time.sleep(2)
+
         currf = cinfo.current
         currd = (currf - curr0) / curr0 * 100
-        print(f'{curr0:.3f} mA --> {currf:.3f} mA')
-        print(f'{currd:.2f} % lost with {kick0:.3f} mrad')
+        stg = f'{kickapp:.3f} mrad: {currd:+.2f} % lost, '
+        stg += f'{curr0:.3f} mA -> {currf:.3f} mA, '
+        stg += f'with {kickx_nr:2d} kicks'
+        print(stg)
+        return curr0, currf, currd
+
+    def find_max_kick(self, kickx_initial=None):
+        """."""
+        # set trial kick
+        kick0 = kickx_initial or self.params.kickx_initial
+        _, _, currd = self.kick_and_get_current(kickx=kick0)
 
         # if current loss within threshold, keep increasing kick amplitude
         if abs(currd) > self.params.curr_var_threshold:
             print(f'maximum kick reached, {kick0:.3f} mrad')
+            print('')
             return kick0, currd
         else:
             newkick = kick0 + self.params.kickx_incrate
@@ -288,9 +301,11 @@ class SextSearchParams(_ParamsBaseClass):
         self.niter = 10
         self.dstrength_beg = 10  # [%]
         self.dstrength_end = 10  # [%]
+        self.dstrength_delta = 1  # [%]
         self.wait_sextupoles = 2  # [s]
         self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
+        self.kickx_nr = 1
         self.curr_var_threshold = 5  # [%]
         self.curr_min = 0.5  # [mA]
         self.curr_max = 2.0  # [mA]
@@ -305,9 +320,11 @@ class SextSearchParams(_ParamsBaseClass):
         stg = dtmp('niter', self.niter)
         stg += ftmp('dstrength_beg', self.dstrength_beg, '[%]')
         stg += ftmp('dstrength_end', self.dstrength_end, '[%]')
+        stg += ftmp('dstrength_delta', self.dstrength_delta, '[%]')
         stg += ftmp('wait_sextupoles', self.wait_sextupoles, '[s]')
         stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
         stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
+        stg += dtmp('kickx_nr', self.kickx_nr)
         stg += ftmp('curr_var_threshold', self.curr_var_threshold, '[%]')
         stg += ftmp('curr_min', self.curr_min, '[mA]')
         stg += ftmp('curr_max', self.curr_max, '[mA]')
@@ -335,7 +352,7 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         if isonline:
             for psname in self.psnames:
                 self.devices[psname] = PowerSupply(psname)
-            self.initial_strengths = self.get_initial_strengths()
+            self.initial_strengths = self.get_current_strengths()
 
         self.data['measure']['initial_strengths'] = self.initial_strengths
         self.data['measure']['psnames'] = self.psnames
@@ -347,9 +364,9 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         self.position = _np.zeros(nknobs)
         self.limits_lower = _np.ones(nknobs)*self.params.dstrength_beg
         self.limits_upper = _np.ones(nknobs)*self.params.dstrength_end
-        self.deltas = (self.limits_upper-self.limits_lower)
+        self.deltas = _np.ones(nknobs)*self.params.dstrength_delta
 
-    def get_initial_strengths(self):
+    def get_current_strengths(self):
         """."""
         strens = []
         for psname in self.psnames:
@@ -386,6 +403,11 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         """."""
         best_strens = self.get_optimized_strengths()
         self.apply_strengths(strengths=best_strens)
+
+    def start(self, print_flag=True):
+        """."""
+        _SimulAnneal.start(self, print_flag=print_flag)
+        self.apply_optimized_strengths()
 
     def print_sextupoles_changes(self, strengths):
         """."""
@@ -428,8 +450,18 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         self._change_sextupoles(sleep=True)
         devices['sofb'].correct_orbit_manually(parms.nr_orbit_corr)
 
+        _, _, lostcurr = \
+            self.kick_and_get_current(
+                kickx=self.params.kickx_initial,
+                kickx_nr=self.params.kicks_nr)
         # measure maximum kick and return
-        return self.find_max_kick()
+        # maxkick, lostcurr = self.find_max_kick()
+        # _ = lostcurr
+        # self.data['measure']['position'].append(self.position)
+        # self.data['measure']['maxkick'].append(maxkick)
+        # self.data['measure']['lostcurr'].append(lostcurr)
+        return abs(lostcurr)
 
     def _restore_position(self):
         self.apply_initial_strengths()
+        # self.apply_optimized_strengths()
