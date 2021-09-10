@@ -128,21 +128,24 @@ class BaseProcess:
         print(stg)
         return curr0, currf, currd
 
-    def find_max_kick(self, kickx_initial=None):
+    def find_max_kick(self, kickx_initial=None, ntrials=None):
         """."""
         # set trial kick
         kick0 = kickx_initial or self.params.kickx_initial
-        _, _, currd = self.kick_and_get_current(kickx=kick0)
-
-        # if current loss within threshold, keep increasing kick amplitude
-        if abs(currd) > self.params.curr_var_threshold:
-            print(f'maximum kick reached, {kick0:.3f} mrad')
-            print('')
-            return kick0, currd
-        else:
+        ntris = ntrials or self.params.kickx_ntrials
+        for _ in range(ntris):
+            _, _, currd = self.kick_and_get_current(kickx=kick0)
+            # if current loss within threshold, keep increasing kick amplitude
+            if abs(currd) > self.params.curr_var_threshold:
+                print(f'max. kick reached, {kick0:.3f} mrad')
+                print('')
+                return kick0, currd
             newkick = kick0 + self.params.kickx_incrate
             print(f'new kick: {newkick:.3f} mrad')
-            return self.find_max_kick(kickx_initial=newkick)
+            kick0 = newkick
+        print(f'after {ntrials:02d} trials the max. kick was not reached yet')
+        print('')
+        return kick0, currd
 
     def _check_current(self, curr_goal, curr_tol=DEFAULT_CURR_TOL):
         curr = self.devices['currinfo'].current
@@ -168,6 +171,7 @@ class TuneScanParams(_ParamsBaseClass):
         self.wait_tunecorr = 1  # [s]
         self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
+        self.kickx_ntrials = 10
         self.curr_var_threshold = 5  # [%]
         self.curr_min = 0.5  # [mA]
         self.curr_max = 2.0  # [mA]
@@ -188,6 +192,7 @@ class TuneScanParams(_ParamsBaseClass):
         stg += ftmp('wait_tunecorr', self.wait_tunecorr, '[s]')
         stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
         stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
+        stg += dtmp('kickx_ntrials', self.kickx_ntrials)
         stg += ftmp('curr_var_threshold', self.curr_var_threshold, '[%]')
         stg += ftmp('curr_min', self.curr_min, '[mA]')
         stg += ftmp('curr_max', self.curr_max, '[mA]')
@@ -281,7 +286,9 @@ class TuneScanInjSI(_BaseClass, BaseProcess):
 
         # measure maximum kick and store data
         maxkick, lostcurr = \
-            self.find_max_kick(kickx_initial=self.params.kickx_initial)
+            self.find_max_kick(
+                kickx_initial=parms.kickx_initial,
+                ntrials=parms.kickx_ntrials)
         print('='*len(stg)*2)
         meas['tunes'].append((mnux, mnuy))
         meas['dtunes'].append((dnux, dnuy))
@@ -305,6 +312,7 @@ class SextSearchParams(_ParamsBaseClass):
         self.wait_sextupoles = 2  # [s]
         self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
+        self.kickx_ntrials = 10
         self.kickx_nr = 1
         self.curr_var_threshold = 5  # [%]
         self.curr_min = 0.5  # [mA]
@@ -324,6 +332,7 @@ class SextSearchParams(_ParamsBaseClass):
         stg += ftmp('wait_sextupoles', self.wait_sextupoles, '[s]')
         stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
         stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
+        stg += dtmp('kickx_ntrials', self.kickx_ntrials)
         stg += dtmp('kickx_nr', self.kickx_nr)
         stg += ftmp('curr_var_threshold', self.curr_var_threshold, '[%]')
         stg += ftmp('curr_min', self.curr_min, '[mA]')
