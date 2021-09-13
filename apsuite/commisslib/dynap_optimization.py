@@ -27,6 +27,8 @@ class BaseProcess:
         self.devices['evg'] = EVG()
         self.devices['pingh'] = PowerSupplyPU(
                 PowerSupplyPU.DEVICES.SI_INJ_DPKCKR)
+        self.devices['pingv'] = PowerSupplyPU(
+                PowerSupplyPU.DEVICES.SI_PING_V)
         self.devices['tsinjseptf'] = \
             PowerSupplyPU(PowerSupplyPU.DEVICES.TS_INJ_SPETF)
         self.devices['tsinjseptg1'] = \
@@ -43,6 +45,7 @@ class BaseProcess:
     def turn_on_injsys(self):
         """."""
         self.devices['pingh'].cmd_turn_off_pulse()
+        self.devices['pingv'].cmd_turn_off_pulse()
         self.devices['tsinjseptf'].cmd_turn_on_pulse()
         self.devices['tsinjseptg1'].cmd_turn_on_pulse()
         self.devices['tsinjseptg2'].cmd_turn_on_pulse()
@@ -56,10 +59,10 @@ class BaseProcess:
 
     def turn_off_injsys(self):
         """."""
-        self.devices['tsinjseptf'].cmd_turn_off_pulse()
-        self.devices['tsinjseptg1'].cmd_turn_off_pulse()
-        self.devices['tsinjseptg2'].cmd_turn_off_pulse()
-        self.devices['nlk'].cmd_turn_off_pulse()
+        # self.devices['tsinjseptf'].cmd_turn_off_pulse()
+        # self.devices['tsinjseptg1'].cmd_turn_off_pulse()
+        # self.devices['tsinjseptg2'].cmd_turn_off_pulse()
+        # self.devices['nlk'].cmd_turn_off_pulse()
         self.devices['egun'].cmd_disable_trigger()
         self.devices['evg'].cmd_turn_off_injection()
         self.devices['evg'].bucket_list = [1]
@@ -101,30 +104,43 @@ class BaseProcess:
         print(f'Stored: {curr:.3f}/{curr_goal:.3f} mA.')
         print()
 
-    def kick_and_get_current(self, kickx=None, kickx_nr=1):
+    def kick_and_get_current(
+            self, kickx=None, kicky=None, kick_nr=1, curr_tol=None):
         """."""
-        # kick PingH and register current loss
+        # kick PingH, PingV and register current loss
         pingh = self.devices['pingh']
+        pingv = self.devices['pingv']
         evg = self.devices['evg']
         cinfo = self.devices['currinfo']
 
         if kickx is not None:
             pingh.strength = kickx
 
-        kickapp = pingh.strength
+        if kicky is not None:
+            pingv.strength = kicky
+
         curr0 = cinfo.current
         self.turn_off_injsys()
         pingh.cmd_turn_on_pulse()
+        pingv.cmd_turn_on_pulse()
 
-        for _ in range(kickx_nr):
+        for _ in range(kick_nr):
             evg.cmd_turn_on_injection()
             _time.sleep(2)
+            if curr_tol is not None:
+                currf_i = cinfo.current
+                currd_i = (currf_i - curr0) / curr0 * 100
+                if abs(currd_i) > curr_tol:
+                    break
 
+        kickxapp = pingh.strength
+        kickyapp = pingv.strength
         currf = cinfo.current
         currd = (currf - curr0) / curr0 * 100
-        stg = f'{kickapp:.3f} mrad: {currd:+.2f} % lost, '
+        stg = f'X: {kickxapp:+.3f} mrad, Y: {kickyapp:+.3f} mrad, '
+        stg += f'{currd:+.2f} % lost, '
         stg += f'{curr0:.3f} mA -> {currf:.3f} mA, '
-        stg += f'with {kickx_nr:2d} kicks'
+        stg += f'with {kick_nr:2d} kicks'
         print(stg)
         return curr0, currf, currd
 
@@ -169,9 +185,13 @@ class TuneScanParams(_ParamsBaseClass):
         self.dtunex_npts = 3
         self.dtuney_npts = 3
         self.wait_tunecorr = 1  # [s]
+
         self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
-        self.kickx_ntrials = 10
+        self.kicky_initial = +0.100  # [mrad]
+        self.kicky_incrate = +0.010  # [mrad]
+        self.kick_ntrials = 10
+
         self.curr_var_threshold = 5  # [%]
         self.curr_min = 0.5  # [mA]
         self.curr_max = 2.0  # [mA]
@@ -310,13 +330,16 @@ class SextSearchParams(_ParamsBaseClass):
         self.dstrength_end = 10  # [%]
         self.dstrength_delta = 1  # [%]
         self.wait_sextupoles = 2  # [s]
+
         self.kickx_initial = -0.500  # [mrad]
         self.kickx_incrate = -0.010  # [mrad]
-        self.kickx_ntrials = 10
-        self.kickx_nr = 1
+        self.kicky_initial = +0.070  # [mrad]
+        self.kicky_incrate = +0.010  # [mrad]
+        self.kick_nr = 3
+
         self.curr_var_threshold = 5  # [%]
         self.curr_min = 0.5  # [mA]
-        self.curr_max = 2.0  # [mA]
+        self.curr_max = 1.2  # [mA]
         self.nr_orbit_corr = 5
         self.filename = ''
 
@@ -332,8 +355,9 @@ class SextSearchParams(_ParamsBaseClass):
         stg += ftmp('wait_sextupoles', self.wait_sextupoles, '[s]')
         stg += ftmp('kickx_initial', self.kickx_initial, '[mrad]')
         stg += ftmp('kickx_incrate', self.kickx_incrate, '[mrad]')
-        stg += dtmp('kickx_ntrials', self.kickx_ntrials)
-        stg += dtmp('kickx_nr', self.kickx_nr)
+        stg += ftmp('kicky_initial', self.kicky_initial, '[mrad]')
+        stg += ftmp('kicky_incrate', self.kicky_incrate, '[mrad]')
+        stg += dtmp('kick_nr', self.kick_nr)
         stg += ftmp('curr_var_threshold', self.curr_var_threshold, '[%]')
         stg += ftmp('curr_min', self.curr_min, '[mA]')
         stg += ftmp('curr_max', self.curr_max, '[mA]')
@@ -362,6 +386,8 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
             for psname in self.psnames:
                 self.devices[psname] = PowerSupply(psname)
             self.initial_strengths = self.get_current_strengths()
+        else:
+            self.initial_strengths = None
 
         self.data['measure']['initial_strengths'] = self.initial_strengths
         self.data['measure']['psnames'] = self.psnames
@@ -391,7 +417,7 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         """."""
         return self._measure_max_kick()
 
-    def save_data(self, fname, overwrite):
+    def save_data(self, fname, overwrite=False):
         """."""
         best_strens = self.initial_strengths*(1 + self.hist_best_positions/100)
         self.data['measure']['hist_best_strengths'] = best_strens
@@ -462,7 +488,8 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         _, _, lostcurr = \
             self.kick_and_get_current(
                 kickx=self.params.kickx_initial,
-                kickx_nr=self.params.kicks_nr)
+                kicky=self.params.kicky_initial,
+                kick_nr=self.params.kick_nr)
         # measure maximum kick and return
         # maxkick, lostcurr = self.find_max_kick()
         # _ = lostcurr
