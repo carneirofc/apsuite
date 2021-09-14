@@ -62,7 +62,7 @@ class BaseProcess:
         # self.devices['tsinjseptf'].cmd_turn_off_pulse()
         # self.devices['tsinjseptg1'].cmd_turn_off_pulse()
         # self.devices['tsinjseptg2'].cmd_turn_off_pulse()
-        # self.devices['nlk'].cmd_turn_off_pulse()
+        self.devices['nlk'].cmd_turn_off_pulse()
         self.devices['egun'].cmd_disable_trigger()
         self.devices['evg'].cmd_turn_off_injection()
         self.devices['evg'].bucket_list = [1]
