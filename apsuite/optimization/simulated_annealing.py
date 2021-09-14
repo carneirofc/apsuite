@@ -150,15 +150,19 @@ class SimulAnneal:
         if not self.niter:
             return
 
-        bpos_hstry = _np.zeros([self.niter, self.ndim])
-        bfig_hstry = _np.zeros([self.niter])
+        # bpos_hstry = _np.zeros([self.niter, self.ndim])
+        # bfig_hstry = _np.zeros([self.niter])
+        bpos_hstry = []
+        bfig_hstry = []
 
         # initial position
         p_old, f_old = _np.copy(self._position), self.calc_obj_fun()
-        bpos_hstry[0, :] = p_old
-        bfig_hstry[0] = f_old
-        self.hist_best_positions = bpos_hstry
-        self.hist_best_objfunc = bfig_hstry
+        # bpos_hstry[0, :] = p_old
+        # bfig_hstry[0] = f_old
+        bpos_hstry.append(p_old)
+        bfig_hstry.append(f_old)
+        self.hist_best_positions = _np.array(bpos_hstry)
+        self.hist_best_objfunc = _np.array(bfig_hstry)
 
         # Number of accepted and unaccepted solutions.
         nr_acc, nr_unacc = 0, 0
@@ -187,7 +191,8 @@ class SimulAnneal:
                 if _np.random.rand() < _np.exp(- f_dif / self._temperature):
                     flag_acc = True
                     if print_flag:
-                        print('Worse solution accepted! ' + str(self._position))
+                        print(
+                            'Worse solution accepted! ' + str(self._position))
                         print('Temperature is: ' + str(self._temperature))
                 else:
                     flag_acc = False
@@ -200,10 +205,10 @@ class SimulAnneal:
                 # Stores the number of accepted solutions
                 nr_acc += 1
                 p_old, f_old = _np.copy(self._position), f_new
-                bpos_hstry[nr_acc, :] = self._position
-                bfig_hstry[nr_acc] = f_old
-                self.hist_best_positions = bpos_hstry
-                self.hist_best_objfunc = bfig_hstry
+                bpos_hstry.append(self._position)
+                bfig_hstry.append(f_old)
+                self.hist_best_positions = _np.array(bpos_hstry)
+                self.hist_best_objfunc = _np.array(bfig_hstry)
                 if print_flag:
                     print('Better solution found! Obj. Func: '
                           '{:5f}'.format(f_old))
@@ -215,8 +220,8 @@ class SimulAnneal:
             if self._flag_save:
                 self._save_data(
                     kiter=k+1, func=f_old, acc=flag_acc,
-                    nacc=nr_acc, bpos=bpos_hstry,
-                    bfunc=bfig_hstry)
+                    nacc=nr_acc, bpos=self.hist_best_positions,
+                    bfunc=self.hist_best_objfunc)
 
             if self._temperature != 0:
                 # Reduces the temperature based on number of iterations
@@ -234,21 +239,24 @@ class SimulAnneal:
         if print_flag:
             print('Finished!')
         if nr_acc:
-            bpos_hstry = bpos_hstry[:nr_acc+1, :]
-            bfig_hstry = bfig_hstry[:nr_acc+1]
+            # bpos_hstry = bpos_hstry[:nr_acc+1, :]
+            # bfig_hstry = bfig_hstry[:nr_acc+1]
             if print_flag:
-                print('Best solution found: ' + str(bpos_hstry[-1, :]))
                 print(
-                    'Best Obj. Func. found: ' + str(bfig_hstry[-1]))
+                    'Best solution found: ' + str(
+                        self.hist_best_positions[-1, :]))
+                print(
+                    'Best Obj. Func. found: ' + str(
+                        self.hist_best_positions[-1]))
                 print('Number of accepted solutions: ' + str(nr_acc))
         else:
-            bpos_hstry = bpos_hstry[0, :]
-            bfig_hstry = bfig_hstry[0]
+            # bpos_hstry = bpos_hstry[0, :]
+            # bfig_hstry = bfig_hstry[0]
             if print_flag:
                 print('It was not possible to find a better solution...')
 
-        self.hist_best_positions = bpos_hstry
-        self.hist_best_objfunc = bfig_hstry
+        self.hist_best_positions = _np.array(bpos_hstry)
+        self.hist_best_objfunc = _np.array(bfig_hstry)
 
     def _check_initialization(self):
         """."""
