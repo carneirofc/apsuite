@@ -124,9 +124,11 @@ class BaseProcess:
         pingh.cmd_turn_on_pulse()
         pingv.cmd_turn_on_pulse()
 
+        kick_idx = 0
         for _ in range(kick_nr):
             evg.cmd_turn_on_injection()
             _time.sleep(2)
+            kick_idx += 1
             if curr_tol is not None:
                 currf_i = cinfo.current
                 currd_i = (currf_i - curr0) / curr0 * 100
@@ -140,7 +142,7 @@ class BaseProcess:
         stg = f'X: {kickxapp:+.3f} mrad, Y: {kickyapp:+.3f} mrad, '
         stg += f'{currd:+.2f} % lost, '
         stg += f'{curr0:.3f} mA -> {currf:.3f} mA, '
-        stg += f'with {kick_nr:2d} kicks'
+        stg += f'with {kick_idx:2d} kicks'
         print(stg)
         return curr0, currf, currd
 
@@ -485,11 +487,16 @@ class SextSearchInjSI(_SimulAnneal, _BaseClass, BaseProcess):
         self._change_sextupoles(sleep=True)
         devices['sofb'].correct_orbit_manually(parms.nr_orbit_corr)
 
+        curr_tol = None
+        if self.hist_best_objfunc.size > 0:
+            curr_tol = self.hist_best_objfunc[-1]
+
         _, _, lostcurr = \
             self.kick_and_get_current(
                 kickx=self.params.kickx_initial,
                 kicky=self.params.kicky_initial,
-                kick_nr=self.params.kick_nr)
+                kick_nr=self.params.kick_nr,
+                curr_tol=curr_tol)
         # measure maximum kick and return
         # maxkick, lostcurr = self.find_max_kick()
         # _ = lostcurr
