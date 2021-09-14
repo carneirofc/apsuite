@@ -247,7 +247,7 @@ class SimulAnneal:
                         self.hist_best_positions[-1, :]))
                 print(
                     'Best Obj. Func. found: ' + str(
-                        self.hist_best_positions[-1]))
+                        self.hist_best_objfunc[-1]))
                 print('Number of accepted solutions: ' + str(nr_acc))
         else:
             # bpos_hstry = bpos_hstry[0, :]
