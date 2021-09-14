@@ -124,11 +124,11 @@ class BaseProcess:
         pingh.cmd_turn_on_pulse()
         pingv.cmd_turn_on_pulse()
 
-        kick_idx = 0
-        for _ in range(kick_nr):
+        for kick_idx in range(kick_nr):
             evg.cmd_turn_on_injection()
-            _time.sleep(2)
-            kick_idx += 1
+            # _time.sleep(2)
+            evg.wait_injection_finish()
+            _time.sleep(0.5)
             if curr_tol is not None:
                 currf_i = cinfo.current
                 currd_i = (currf_i - curr0) / curr0 * 100
@@ -169,6 +169,16 @@ class BaseProcess:
         curr = self.devices['currinfo'].current
         statusok = curr > curr_goal or abs(curr - curr_goal) < curr_tol
         return statusok, curr
+
+    def _check_pingers_problem(self):
+        pingers = [self.devices['pingh'], self.devices['pingv']]
+        for ping in self.pingers:
+            if ping.voltage_mon < 0:
+                # reset pinger
+                ping.cmd_turn_off()
+                ping.cmd_turn_on()
+                return True
+        return False
 
     def _restore_position(self):
         raise NotImplementedError
