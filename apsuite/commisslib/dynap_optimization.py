@@ -126,9 +126,8 @@ class BaseProcess:
 
         for kick_idx in range(kick_nr):
             evg.cmd_turn_on_injection()
-            # _time.sleep(2)
             evg.wait_injection_finish()
-            _time.sleep(0.5)
+            _time.sleep(1)
             if curr_tol is not None:
                 currf_i = cinfo.current
                 currd_i = (currf_i - curr0) / curr0 * 100
@@ -142,7 +141,7 @@ class BaseProcess:
         stg = f'X: {kickxapp:+.3f} mrad, Y: {kickyapp:+.3f} mrad, '
         stg += f'{currd:+.2f} % lost, '
         stg += f'{curr0:.3f} mA -> {currf:.3f} mA, '
-        stg += f'with {kick_idx:2d} kicks'
+        stg += f'with {kick_idx+1:2d} kicks'
         print(stg)
         return curr0, currf, currd
 
@@ -172,7 +171,7 @@ class BaseProcess:
 
     def _check_pingers_problem(self):
         pingers = [self.devices['pingh'], self.devices['pingv']]
-        for ping in self.pingers:
+        for ping in pingers:
             if ping.voltage_mon < 0:
                 # reset pinger
                 ping.cmd_turn_off()
