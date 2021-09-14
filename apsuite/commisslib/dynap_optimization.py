@@ -123,11 +123,12 @@ class BaseProcess:
         self.turn_off_injsys()
         pingh.cmd_turn_on_pulse()
         pingv.cmd_turn_on_pulse()
+        self._loop_reset_pingers()
 
         for kick_idx in range(kick_nr):
             evg.cmd_turn_on_injection()
             evg.wait_injection_finish()
-            _time.sleep(1)
+            _time.sleep(2)
             if curr_tol is not None:
                 currf_i = cinfo.current
                 currd_i = (currf_i - curr0) / curr0 * 100
@@ -178,6 +179,15 @@ class BaseProcess:
                 ping.cmd_turn_on()
                 return True
         return False
+
+    def _loop_reset_pingers(self):
+        trial = 0
+        while self._check_pingers_problem():
+            if trial > 2:
+                raise Exception('3 unsucessful Pinger reset trials.')
+            print('Problem with pingers voltage. Resetting...')
+            _time.sleep(5)
+            trial += 1
 
     def _restore_position(self):
         raise NotImplementedError
