@@ -11,7 +11,7 @@ import scipy.optimize as _scy_opt
 import scipy.integrate as _scy_int
 
 from siriuspy.devices import BPM, CurrInfoSI, EGun, RFCav, Tune, Trigger, \
-    Event, EVG
+    Event, EVG, SOFB
 from siriuspy.search import BPMSearch
 from siriuspy.epics import PV
 
@@ -26,7 +26,7 @@ class MeasTouschekParams(_ParamsBaseClass):
 
     def __init__(self):
         """."""
-        _ParamsBaseClass().__init__()
+        super().__init__()
         self.total_duration = 0  # [s] 0 means infinity
         self.save_partial = True
         self.bpm_name = self.DEFAULT_BPMNAME
@@ -39,8 +39,8 @@ class MeasTouschekParams(_ParamsBaseClass):
         self.mask_end_bunch_b = 240
         self.bucket_bunch_a = 1
         self.bucket_bunch_b = 550
-        self.acq_nrsamples_pre = 10000
-        self.acq_nrsamples_post = 10000
+        self.acq_nrsamples_pre = 0
+        self.acq_nrsamples_post = 20000
         self.filename = ''
 
     def __str__(self):
@@ -52,7 +52,7 @@ class MeasTouschekParams(_ParamsBaseClass):
         stg = ''
         stg += ftmp(
             'total_duration', self.total_duration, '[s] (0) means forever')
-        stg += f'save_partial = {str(bool(self.save_partial)):s}'
+        stg += f'{"save_partial":20s} = {str(bool(self.save_partial)):s}\n'
         stg += stmp('bpm_name', self.bpm_name)
         stg += ftmp('bpm_attenuation', self.bpm_attenuation, '[dB]')
         stg += ftmp('acquisition_timeout', self.acquisition_timeout, '[s]')
@@ -77,15 +77,21 @@ class MeasTouschekLifetime(_BaseClass):
     RFFEAttSB = 30  # [dB] Singlebunch Attenuation
     FILTER_OUTLIER = 0.2  # Relative error data/fitting
 
-    # calibration curves measured during machine shift in 2021/09/21:
-    EXCCURVE_SUMA = [-1.836e-3, 1.9795e-4]
-    EXCCURVE_SUMB = [-2.086e-3, 1.9875e-4]
-    OFFSET_DCCT = 8.4e-3  # [mA]
+    # # calibration curves measured during machine shift in 2021/09/21:
+    # EXCCURVE_SUMA = [-1.836e-3, 1.9795e-4]
+    # EXCCURVE_SUMB = [-2.086e-3, 1.9875e-4]
+    # OFFSET_DCCT = 8.4e-3  # [mA]
+
+    # calibration curves measured with BPM switching off (direct mode) during
+    # machine shift in 2021/11/01:
+    EXCCURVE_SUMA = [1.22949e-3, 1.9433e-4]  # BPM Sum [counts] -> Current [mA]
+    EXCCURVE_SUMB = [2.55117e-3, 1.9519e-4]  # BPM Sum [counts] -> Current [mA]
+    OFFSET_DCCT = 12.64e-3  # [mA]
 
     def __init__(self, isonline=True):
         """."""
-        _BaseClass.__init__(
-            self, params=MeasTouschekParams(), target=self._do_measure,
+        super().__init__(
+            params=MeasTouschekParams(), target=self._do_measure,
             isonline=isonline)
 
         self._recursion = 0
@@ -96,7 +102,7 @@ class MeasTouschekLifetime(_BaseClass):
             bpmnames = BPMSearch.get_names({'sec': 'SI', 'dev': 'BPM'})
             bpm = BPM(bpmnames[0])
             self._bpms[bpmnames[0]] = bpm
-            propties = bpm.auto_monitor_status()
+            propties = bpm.auto_monitor_status
             for name in bpmnames[1:]:
                 bpm = BPM(name)
                 for ppt in propties:
@@ -111,6 +117,7 @@ class MeasTouschekLifetime(_BaseClass):
             self.devices['egun'] = EGun()
             self.devices['rfcav'] = RFCav(RFCav.DEVICES.SI)
             self.devices['tune'] = Tune(Tune.DEVICES.SI)
+            self.devices['sofb'] = SOFB(SOFB.DEVICES.SI)
             self.pvs['avg_pressure'] = PV(MeasTouschekLifetime.AVG_PRESSURE_PV)
 
     def set_bpms_attenuation(self, value_att=RFFEAttSB):
@@ -144,8 +151,8 @@ class MeasTouschekLifetime(_BaseClass):
 
     def process_data(
             self, proc_type='fit_model', nr_bunches=1, nr_intervals=1,
-            window=1000, include_bunlen=False, outlier_std=6,
-            outlier_max_recursion=3):
+            window=1000, include_bunlen=False, outlier_poly_deg=8,
+            outlier_std=6, outlier_max_recursion=3):
         """."""
         if 'analysis' in self.data:
             self.analysis = self.data.pop('analysis')
@@ -155,9 +162,12 @@ class MeasTouschekLifetime(_BaseClass):
         # Pre-processing of data:
         self._handle_data_lens()
         self._remove_nans()
+        self._remove_negatives()
         self._calc_current_per_bunch(nr_bunches=nr_bunches)
         self._remove_outliers(
-            num_std=outlier_std, max_recursion=outlier_max_recursion)
+            poly_deg=outlier_poly_deg,
+            num_std=outlier_std,
+            max_recursion=outlier_max_recursion)
 
         if proc_type.lower().startswith('fit_model'):
             self._process_model_totalrate(nr_intervals=nr_intervals)
@@ -386,6 +396,28 @@ class MeasTouschekLifetime(_BaseClass):
             fig.savefig(fname, dpi=300, format='png')
         return fig, ax1
 
+    def plot_raw_data(self, fname=None, title=None):
+        """."""
+        meas = self.data
+        sum_a, sum_b = meas['sum_a'], meas['sum_b']
+        dt_a = (_np.array(meas['tim_a']) - meas['tim_a'][0])/3600
+        dt_b = (_np.array(meas['tim_b']) - meas['tim_b'][0])/3600
+
+        fig = _mplt.figure(figsize=(8, 6))
+        gs = _mgs.GridSpec(1, 1)
+        ax1 = _mplt.subplot(gs[0, 0])
+        ax1.plot(dt_a, sum_a, '.', color='C0', label='Bunch A')
+        ax1.plot(dt_b, sum_b, '.', color='C1', label='Bunch B')
+        ax1.set_xlabel('time [h]')
+        ax1.set_ylabel('BPM sum [counts]')
+        ax1.set_title(title)
+        ax1.legend()
+        ax1.grid(ls='--', alpha=0.5)
+        _mplt.tight_layout(True)
+        if fname:
+            fig.savefig(fname, dpi=300, format='png')
+        return fig, ax1
+
     def _handle_data_lens(self):
         meas = self.data
         len_min = min(len(meas['sum_a']), len(meas['sum_b']))
@@ -420,6 +452,23 @@ class MeasTouschekLifetime(_BaseClass):
         anly['current'] = currt
         self.analysis = anly
 
+    def _remove_negatives(self):
+        anly = self.analysis
+        sum_a, sum_b = anly['sum_a'], anly['sum_b']
+        tim_a, tim_b = anly['tim_a'], anly['tim_b']
+        currt = anly['current']
+
+        posidx = (sum_a > 0) & (sum_b > 0)
+        sum_a, sum_b = sum_a[posidx], sum_b[posidx]
+        tim_a, tim_b = tim_a[posidx], tim_b[posidx]
+        currt = currt[posidx]
+
+        anly = dict()
+        anly['sum_a'], anly['sum_b'] = sum_a, sum_b
+        anly['tim_a'], anly['tim_b'] = tim_a, tim_b
+        anly['current'] = currt
+        self.analysis = anly
+
     def _calc_current_per_bunch(self, nr_bunches=1):
         """."""
         anly = self.analysis
@@ -429,7 +478,7 @@ class MeasTouschekLifetime(_BaseClass):
         anly['current_b'] = _np_pfit.polyval(
             anly['sum_b']/nr_bunches, self.EXCCURVE_SUMB)
 
-    def _remove_outliers(self, num_std=6, max_recursion=3):
+    def _remove_outliers(self, poly_deg=8, num_std=6, max_recursion=3):
         anly = self.analysis
 
         dt_a = anly['tim_a']/3600
@@ -437,19 +486,17 @@ class MeasTouschekLifetime(_BaseClass):
         curr_a = anly['current_a']
         curr_b = anly['current_b']
 
-        loga = _np.log(curr_a)
-        logb = _np.log(curr_b)
-        pol_a = _np_pfit.polyfit(dt_a, loga, deg=1)
-        pol_b = _np_pfit.polyfit(dt_b, logb, deg=1)
-        fit_a = _np.exp(_np_pfit.polyval(dt_a, pol_a))
-        fit_b = _np.exp(_np_pfit.polyval(dt_b, pol_b))
+        pol_a = _np_pfit.polyfit(dt_a, curr_a, deg=poly_deg)
+        pol_b = _np_pfit.polyfit(dt_b, curr_b, deg=poly_deg)
+
+        fit_a = _np_pfit.polyval(dt_a, pol_a)
+        fit_b = _np_pfit.polyval(dt_b, pol_b)
 
         diff_a = _np.abs(curr_a - fit_a)
         diff_b = _np.abs(curr_b - fit_b)
 
         out = num_std
         idx_keep = (diff_a < out*diff_a.std()) & (diff_b < out*diff_b.std())
-
         for key in anly.keys():
             anly[key] = anly[key][idx_keep]
 
@@ -457,7 +504,8 @@ class MeasTouschekLifetime(_BaseClass):
             self._recursion, curr_a.size - _np.sum(idx_keep)))
         if _np.sum(idx_keep) < curr_a.size and self._recursion < max_recursion:
             self._recursion += 1
-            self._remove_outliers(num_std, max_recursion=max_recursion)
+            self._remove_outliers(
+                poly_deg, num_std, max_recursion=max_recursion)
         else:
             self._recursion = 0
 
@@ -595,7 +643,8 @@ class MeasTouschekLifetime(_BaseClass):
     def _do_measure(self):
         meas = dict(
             sum_a=[], sum_b=[], nan_a=[], nan_b=[], tim_a=[], tim_b=[],
-            current=[], rf_voltage=[], avg_pressure=[], tunex=[], tuney=[])
+            current=[], rf_voltage=[], avg_pressure=[],
+            tunex=[], tuney=[], dorbx=[], dorby=[])
         parms = self.params
 
         curr = self.devices['currinfo']
@@ -603,9 +652,13 @@ class MeasTouschekLifetime(_BaseClass):
         tune = self.devices['tune']
         press = self.pvs['avg_pressure']
         bpm = self.devices[parms.bpm_name]
+        bpm.cmd_sync_tbt()  # Sync TbT BPM acquisition
 
         excx0 = tune.enablex
         excy0 = tune.enabley
+        # Ensures that tune excitation is off before measurement.
+        tune.cmd_disablex()
+        tune.cmd_disabley()
 
         pvsum = bpm.pv_object('GEN_SUMArrayData')
         pvsum.auto_monitor = True
@@ -615,6 +668,8 @@ class MeasTouschekLifetime(_BaseClass):
         self.devices['event'].mode = 'Continuous'
         self.devices['evg'].cmd_update_events()
 
+        swtch0 = bpm.switching_mode
+        bpm.cmd_turn_off_switching()
         bpm.cmd_acq_abort()
         bpm.acq_nrsamples_pre = parms.acq_nrsamples_pre
         bpm.acq_nrsamples_post = parms.acq_nrsamples_post
@@ -631,38 +686,58 @@ class MeasTouschekLifetime(_BaseClass):
             # Get data for bunch with higher current
             bpm.tbt_mask_beg = parms.mask_beg_bunch_a
             bpm.tbt_mask_end = parms.mask_end_bunch_a
+            _time.sleep(parms.acquisition_period/4)
             self._updated_evt.clear()
             bpm.cmd_acq_start()
             bpm.wait_acq_finish(timeout=parms.acquisition_timeout)
             self._updated_evt.wait(timeout=parms.acquisition_timeout)
             suma = bpm.mt_possum
+            # Use mean to remove influence of bad points
+            # (maybe consider using median):
             meas['sum_a'].append(_np.nanmean(suma))
             meas['nan_a'].append(_np.sum(_np.isnan(suma)))
             meas['tim_a'].append(_time.time())
 
+            _time.sleep(parms.acquisition_period/4)
+
             # Get data for bunch with lower current
             bpm.tbt_mask_beg = parms.mask_beg_bunch_b
             bpm.tbt_mask_end = parms.mask_end_bunch_b
+            _time.sleep(parms.acquisition_period/4)
             self._updated_evt.clear()
             bpm.cmd_acq_start()
             bpm.wait_acq_finish(timeout=parms.acquisition_timeout)
             self._updated_evt.wait(timeout=parms.acquisition_timeout)
             sumb = bpm.mt_possum
+            # Use mean to remove influence of bad points
+            # (maybe consider using median):
             meas['sum_b'].append(_np.nanmean(sumb))
             meas['nan_b'].append(_np.sum(_np.isnan(sumb)))
             meas['tim_b'].append(_time.time())
 
             # Get other relevant parameters
             meas['current'].append(curr.current)
-            meas['tunex'] = tune.tunex
-            meas['tuney'] = tune.tuney
             meas['rf_voltage'].append(rfcav.dev_cavmon.gap_voltage)
             meas['avg_pressure'].append(press.value)
 
             if not idx % 100 and parms.save_partial:
-                # Only get the tune at every 100 iterations not to disturb the
-                # beam too much with the tune shaker
-                tunex, tuney = self._get_tunes()
+                # 5 iterations of orbit correction.
+                # SOFB must be properly configured:
+                # 1) SOFBMode: SlowOrb with Num. Pts.: 50;
+                # 2) BPMs nearby RF cavity (around 02M1 and 02M2 ) should be
+                # removed from correction;
+                # 3) the BPM used to acquire sum data also should be removed
+                # (since switching mode is off);
+                # 4) singular values should be removed until the delta kicks
+                # are reasonable (about 120 out of 281 SVs are sufficient);
+                dorbx, dorby = self._correct_and_get_cod()
+                meas['dorbx'].append(dorbx)
+                meas['dorby'].append(dorby)
+
+                # Turn on tune excitation and get the tune only at every 100
+                # iterations not to disturb the beam too much with the tune
+                # shaker.
+                tunex, tuney = self._excite_and_get_tunes()
                 meas['tunex'].append(tunex)
                 meas['tuney'].append(tuney)
 
@@ -670,35 +745,45 @@ class MeasTouschekLifetime(_BaseClass):
                 self.save_data(fname=parms.filename, overwrite=True)
                 print(f'{idx:04d}: data saved to file.')
             idx += 1
-            _time.sleep(parms.acquisition_period)
+            _time.sleep(parms.acquisition_period/4)
 
-        tune.enablex = int(excx0)
-        tune.enabley = int(excy0)
+        self.data = meas
+        self.save_data(fname=parms.filename, overwrite=True)
+        print(f'{idx:04d}: data saved to file.')
+
+        if excx0:
+            tune.cmd_enablex()
+        if excy0:
+            tune.cmd_enabley()
+        bpm.switching_mode = swtch0
+
         self.devices['trigger'].source = 'DigSI'
         self.devices['event'].mode = 'External'
         self.devices['evg'].cmd_update_events()
         pvsum.clear_callbacks()
         pvsum.auto_monitor = False
 
-        self.data = meas
-        self.save_data(fname=parms.filename, overwrite=True)
-        print(f'{idx:04d}: data saved to file.')
         print('Done!')
 
     def _pv_updated(self, *args, **kwargs):
         _ = args, kwargs
         self._updated_evt.set()
 
-    def _get_tunes(self):
+    def _excite_and_get_tunes(self):
         tune = self.devices['tune']
-        tune.enablex = 1
-        tune.enabley = 1
-        _time.sleep(1)
+        tune.cmd_enablex()
+        tune.cmd_enabley()
+        _time.sleep(self.params.acquisition_period)
         tunex = tune.tunex
         tuney = tune.tuney
-        tune.enablex = 0
-        tune.enabley = 0
+        tune.cmd_disablex()
+        tune.cmd_disabley()
         return tunex, tuney
+
+    def _correct_and_get_cod(self):
+        sofb = self.devices['sofb']
+        sofb.correct_orbit_manually(nr_iters=5)
+        return sofb.orbx-sofb.refx, sofb.orby-sofb.refy
 
     @staticmethod
     def _linear_fun(tim, *coeff):
